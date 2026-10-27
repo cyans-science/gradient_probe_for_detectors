@@ -3,3 +3,12 @@ gradient_hit_viewer.py
 run_gradient_statistics.sh
 run_gradient_hit_viewer.sh
 git_include.txt
+LICENSE
+build_event_index.py
+run_build_event_index.sh
+run_all.sh
+diagnostics/check_conversion_counts.sh
+diagnostics/compare_djctd_root.py
+diagnostics/run_compare_djcdt_root.sh
+diagnostics/argmax_position.py
+diagnostics/run_argmax_position.sh

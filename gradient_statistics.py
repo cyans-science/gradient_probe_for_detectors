@@ -1,12 +1,103 @@
-import pandas as pd
-import numpy as np
+"""
+gradient_statistics.py
+
+Purpose
+-------
+Distribution and selection of the per-hit probe gradients of one run.
+
+  * Reads every stage CSV (event_id,hit_id,value) in --probe-dir. Stage names
+    come from the file names, ordered from input to output head.
+  * Checks that all stages list the same hits in the same order.
+  * Plots the signed-log10 gradient distributions of all stages (overlay).
+  * Selects hits: per stage, the hit with the largest |gradient| of each
+    event, then the top-n events; kept if in the top-n of >= min_stages
+    stages. Plots how the selected hits evolve across stages.
+  * Writes selection.csv, the hand-off to gradient_hit_viewer.py. If an
+    events.csv from build_event_index.py with a passed L1 check is found,
+    each selected hit also gets its root file and entry.
+
+Outputs (in --out-dir, the run directory)
+-----------------------------------------
+figures/gradient_histograms_overlay.{png,pdf}
+selections/<name>/selection.csv
+selections/<name>/selection_meta.json   criteria, stages, transform, colour scale
+selections/<name>/top_hits_evolution.{png,pdf}
+
+Gradients are used as written by fisher_val_loop, without per-batch
+normalisation.
+
+cyan.jo, 2026-10-21 (restructured from the earlier analysis script)
+"""
+from __future__ import annotations
+
+import argparse
+import json
+from datetime import datetime
 from pathlib import Path
-import sys
-sys.path.append('Utils/')
-from PlotUtils import setMplParam, getColour, getHistoParam, annotate_histogram, enable_histogram_counts
-from ExternalFunctions import add_text_to_ax, nice_string_output
+
+import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
-    
+
+# Utils (PlotUtils, ExternalFunctions) is put on PYTHONPATH by run_gradient_statistics.sh.
+try:
+    from PlotUtils import setMplParam, getColour, getHistoParam, annotate_histogram, enable_histogram_counts
+    from ExternalFunctions import add_text_to_ax, nice_string_output
+except ModuleNotFoundError as error:
+    raise SystemExit(
+        f"{error}. PlotUtils and ExternalFunctions live in /work/cjo/Utils; run this "
+        "script through its run_*.sh wrapper, which puts that folder on PYTHONPATH."
+    ) from error
+
+# Probe locations in forward order, and their plot labels.
+STAGE_ORDER = [
+    "input", "post_initial",
+    "post_gn1", "post_gn2", "post_gn3", "post_gn4",
+    "post_output_head",
+]
+STAGE_LABELS = {
+    "input": "@Input",
+    "post_initial": "@Initial Processing",
+    "post_gn1": "@After GN1",
+    "post_gn2": "@After GN2",
+    "post_gn3": "@After GN3",
+    "post_gn4": "@After GN4",
+    "post_output_head": "@After Output Head",
+}
+EVENT_INDEX_COLUMNS = ["root_file", "entry", "djctd_file", "local_idx", "n_hits"]
+
+
+# -----------------------------------------------------------------------------
+# Reading and checking the probe tables
+# -----------------------------------------------------------------------------
+def discover_stages(probe_dir) -> dict:
+    """Stage key -> CSV path for every CSV in probe_dir, in forward order.
+
+    A file belongs to the longest known stage key contained in its name
+    (so prefixed names like 'run_post_gn1.csv' work). Unknown names are kept
+    under their own stem and placed after the known stages.
+    """
+    files = sorted(Path(probe_dir).glob("*.csv"))
+    if not files:
+        raise FileNotFoundError(f"No CSV files in {probe_dir}")
+
+    keys_longest_first = sorted(STAGE_ORDER, key=len, reverse=True)
+    stages = {}
+    for path in files:
+        key = next((k for k in keys_longest_first if k in path.stem), path.stem)
+        if key in stages:
+            raise ValueError(f"{path.name} and {stages[key].name} both match stage {key!r}")
+        stages[key] = path
+
+    def position(key):
+        return (STAGE_ORDER.index(key) if key in STAGE_ORDER else len(STAGE_ORDER), key)
+
+    unknown = [k for k in stages if k not in STAGE_ORDER]
+    if unknown:
+        print(f"WARNING: unknown stage names {unknown}, placed after the known stages.")
+    return {key: stages[key] for key in sorted(stages, key=position)}
+
+
 def read_probe_file(probe_file):
     """
     Read a Fisher/probe gradient CSV file.
@@ -21,16 +112,19 @@ def read_probe_file(probe_file):
     -------
     pd.DataFrame
         Columns:
-            event_id : int
-            hit_id   : int
-            value    : float
+            event_id : int32
+            hit_id   : int32
+            value    : float32 (the gradients are float32 tensors, so this is exact)
     """
     probe_file = Path(probe_file)
 
     if not probe_file.exists():
         raise FileNotFoundError(f"Probe file not found: {probe_file}")
 
-    df = pd.read_csv(probe_file)
+    df = pd.read_csv(
+        probe_file,
+        dtype={"event_id": "int32", "hit_id": "int32", "value": "float32"},
+    )
 
     expected_columns = {"event_id", "hit_id", "value"}
     missing_columns = expected_columns - set(df.columns)
@@ -40,22 +134,53 @@ def read_probe_file(probe_file):
             f"{probe_file.name} is missing columns: {sorted(missing_columns)}"
         )
 
-    df = df[["event_id", "hit_id", "value"]].copy()
+    return df[["event_id", "hit_id", "value"]]
 
-    df["event_id"] = df["event_id"].astype(int)
-    df["hit_id"] = df["hit_id"].astype(int)
-    df["value"] = df["value"].astype(float)
 
-    return df
+def check_aligned(stage_frames: dict) -> None:
+    """All stages must hold the same hits in the same row order.
 
+    fisher_val_loop writes rows sorted by event_id with hit_id = 0..n-1 inside
+    each event, identically for every stage. Later steps rely on this to
+    compare stages row by row.
+    """
+    stages = list(stage_frames)
+    reference = stage_frames[stages[0]]
+    event_id = reference["event_id"].to_numpy()
+    hit_id = reference["hit_id"].to_numpy()
+    if event_id.size == 0:
+        raise ValueError(f"{stages[0]}: no rows")
+    if np.any(np.diff(event_id) < 0):
+        raise ValueError(f"{stages[0]}: rows are not sorted by event_id")
+
+    starts = np.flatnonzero(np.r_[True, event_id[1:] != event_id[:-1]])
+    lengths = np.diff(np.r_[starts, event_id.size])
+    expected_hit_id = np.arange(event_id.size) - np.repeat(starts, lengths)
+    if not np.array_equal(hit_id, expected_hit_id):
+        raise ValueError(f"{stages[0]}: hit_id is not 0..n-1 within each event")
+
+    for stage in stages[1:]:
+        frame = stage_frames[stage]
+        if (
+            len(frame) != len(reference)
+            or not np.array_equal(frame["event_id"].to_numpy(), event_id)
+            or not np.array_equal(frame["hit_id"].to_numpy(), hit_id)
+        ):
+            raise ValueError(f"{stage}: rows differ from {stages[0]}")
+
+
+# -----------------------------------------------------------------------------
+# Selection
+# -----------------------------------------------------------------------------
 def get_highest_values(df: pd.DataFrame, n: int = 20) -> pd.DataFrame:
     """Top-n rows among the per-event maxima, ranked by |value| (sign kept)."""
     score = df["value"].abs()
     idx = score.groupby(df["event_id"]).idxmax()          # per-event max |value|
     return df.loc[score.loc[idx].nlargest(n).index]       # top-n events, signed rows
 
+
 def track_top_hits(
-    df_dict: dict[str, pd.DataFrame], n: int = 20, min_stages: int = 1
+    df_dict: dict, n: int = 20, min_stages: int = 1
 ) -> pd.DataFrame:
     """
     Follow the hits that are in the top-n (by |value|) at any stage across all stages.
@@ -64,6 +189,7 @@ def track_top_hits(
     ----------
     df_dict : dict[str, pd.DataFrame]
         Stage name -> DataFrame (event_id, hit_id, value), in chronological order.
+        All frames must be row-aligned (see check_aligned).
     n : int
         Number of top hits taken from each stage.
     min_stages : int
@@ -76,40 +202,91 @@ def track_top_hits(
         plus `peak_stage` (stage of max |value|), `top_in` (stages where the hit was
         in the top-n) and `n_top` (len of `top_in`).
     """
-    keys_per_stage = {
-        name: get_highest_values(df, n)[["event_id", "hit_id"]]
-        for name, df in df_dict.items()
-    }
-    candidates = pd.MultiIndex.from_frame(
-        pd.concat(keys_per_stage.values()).drop_duplicates()
-    )
+    stages = list(df_dict)
+    reference = df_dict[stages[0]]
 
-    wide = pd.DataFrame({
-        name: df.set_index(["event_id", "hit_id"])["value"].reindex(candidates)
-        for name, df in df_dict.items()
-    })
+    # Rows are aligned across stages, so a hit is identified by its row position.
+    top_rows = {s: set(get_highest_values(df, n).index) for s, df in df_dict.items()}
+    rows = np.array(sorted(set().union(*top_rows.values())), dtype=np.int64)
+
+    wide = reference.iloc[rows][["event_id", "hit_id"]].copy()
+    for s in stages:
+        wide[s] = df_dict[s]["value"].to_numpy()[rows]
+    wide.index = pd.MultiIndex.from_frame(wide[["event_id", "hit_id"]])
+    wide = wide[stages]
     wide.columns.name = "stage"
 
-    stages = list(df_dict)
-    top_sets = {s: set(map(tuple, keys_per_stage[s].values)) for s in stages}
     wide["peak_stage"] = wide[stages].abs().idxmax(axis=1)
-    wide["top_in"] = [[s for s in stages if key in top_sets[s]] for key in wide.index]
+    wide["top_in"] = [[s for s in stages if row in top_rows[s]] for row in rows]
     wide["n_top"] = wide["top_in"].str.len()
 
     wide = wide[wide["n_top"] >= min_stages]
     return wide.sort_values(stages[-1], ascending=False, key=lambda s: s.abs())
 
+
+def attach_event_index(selection: pd.DataFrame, events_csv: Path):
+    """Add root file and entry per selected hit from build_event_index.py output.
+
+    Returns (selection, info). Joins only if events_meta.json next to the
+    index reports check L1 as passed.
+    """
+    if not events_csv.is_file():
+        return selection, {"joined": False, "reason": f"{events_csv} not found"}
+
+    meta_path = events_csv.with_name("events_meta.json")
+    l1_status = None
+    if meta_path.is_file():
+        with open(meta_path, encoding="utf-8") as handle:
+            l1_status = json.load(handle).get("checks", {}).get("L1", {}).get("status")
+    if l1_status != "passed":
+        return selection, {
+            "joined": False,
+            "reason": f"check L1 is {l1_status!r} in {meta_path}, not 'passed'",
+        }
+
+    events = pd.read_csv(events_csv, usecols=["event_id"] + EVENT_INDEX_COLUMNS)
+    joined = selection.merge(events, on="event_id", how="left", validate="many_to_one")
+    if joined["root_file"].isna().any():
+        missing = sorted(joined.loc[joined["root_file"].isna(), "event_id"].unique())
+        raise ValueError(f"event_ids missing from {events_csv}: {missing[:10]}")
+    return joined, {"joined": True, "path": str(events_csv)}
+
+
+def colour_scale(stage_frames: dict, log_scale: float) -> dict:
+    """|z| maximum and 99.9th percentile per stage and over all stages.
+
+    z is the signed_log10 transform used in the histograms, so the viewer can
+    use one colour scale for every event.
+    """
+    abs_g_max, abs_g_p999 = {}, {}
+    for stage, frame in stage_frames.items():
+        abs_g = np.abs(frame["value"].to_numpy())
+        abs_g_max[stage] = float(abs_g.max())
+        abs_g_p999[stage] = float(np.quantile(abs_g, 0.999))
+
+    def to_z(g):
+        return float(np.log10(1 + g / log_scale))
+
+    return {
+        "abs_z_max": {**{s: to_z(g) for s, g in abs_g_max.items()},
+                      "all": to_z(max(abs_g_max.values()))},
+        "abs_z_p999": {s: to_z(g) for s, g in abs_g_p999.items()},
+    }
+
+
+# -----------------------------------------------------------------------------
+# Plots
+# -----------------------------------------------------------------------------
 def plot_top_hits_evolution(
-    stages: dict[str, pd.DataFrame], n: int = 20, min_stages: int = 2
+    wide: pd.DataFrame, stage_cols: list, n: int, min_stages: int,
+    labels: dict | None = None, save_dir=None, formats=("png", "pdf"), dpi=300,
 ):
     from matplotlib.ticker import FuncFormatter
     from matplotlib.lines import Line2D
 
-    wide = track_top_hits(stages, n=n, min_stages=min_stages)
-    stage_cols = list(stages)
     if wide.empty:
         print(f"No hit is in the top-{n} of >= {min_stages} stages.")
-        return wide
+        return None
 
     fig, ax = plt.subplots(figsize=(13, 6))
     x = np.arange(len(stage_cols))
@@ -130,7 +307,7 @@ def plot_top_hits_evolution(
     ax.yaxis.set_major_formatter(FuncFormatter(lambda y, _: f"{y:.0e}"))
     ax.tick_params(axis="y", which="both", labelsize=12)
     ax.set_xticks(x)
-    ax.set_xticklabels(stage_cols)
+    ax.set_xticklabels([(labels or {}).get(s, s) for s in stage_cols])
     ax.set_xlabel("stage")
     ax.set_ylabel("abs(gradient)")
     ax.set_title(rf"Top-{n} $\|$gradient$\|$ hits in ≥ {min_stages} stages ({len(wide)} hits)")
@@ -149,26 +326,35 @@ def plot_top_hits_evolution(
             bbox_to_anchor=(1.01, 1), fontsize=10, frameon=False,
         )
     fig.tight_layout()
-    plt.show()
-    return wide
+
+    if save_dir is not None:
+        save_dir = Path(save_dir)
+        save_dir.mkdir(parents=True, exist_ok=True)
+        for fmt in formats:
+            out_path = save_dir / f"top_hits_evolution.{fmt}"
+            fig.savefig(out_path, dpi=dpi, bbox_inches="tight")
+            print(f"Saved {out_path}")
+    plt.close(fig)
+    return fig
+
 
 def original_plot_gradient_histogram(df:pd.DataFrame, xlim=None):
     # log_10_value=np.log...
     Nbins, binwidth, bins, counts, bin_centers = getHistoParam(df["value"], Nbins=100)
-    
+
     fig, ax = plt.subplots(figsize=(11, 8))
     ax.hist(bin_centers, bins=bins, weights=counts, histtype='step', color=getColour(0), label="Gradient values")
     ax.set_xlabel("Gradient value")
     ax.set_ylabel("Counts")
     if xlim is not None:
         ax.set_xlim(xlim)
-        
+
 def signed_log10(values, scale=1e-6):
-    values = np.asarray(values)
+    values = np.asarray(values, dtype=np.float64)
     return np.sign(values) * np.log10(1 + np.abs(values) / scale)
 
 def inverse_signed_log10(z, scale=1e-6):
-    z = np.asarray(z)
+    z = np.asarray(z, dtype=np.float64)
     return np.sign(z) * scale * (10**np.abs(z) - 1)
 
 def latex_scientific(x):
@@ -179,7 +365,7 @@ def latex_scientific(x):
         return rf"10^{{{exponent}}}"
     else:
         return rf"{coefficient:g}\times10^{{{exponent}}}"
-    
+
 def plot_gradient_histogram(
     df: pd.DataFrame,
     title=None,
@@ -587,71 +773,121 @@ def plot_gradient_histograms_overlay(
 
     return fig, ax
 
-def run(source_dir:Path, save_dir:Path):
-    probe_files = {
-        "initial": next(source_dir.glob("*initial*.csv")),
-        "post_gn1": next(source_dir.glob("*post_gn1*.csv")),
-        "post_gn2": next(source_dir.glob("*post_gn2*.csv")),
-        "post_gn3": next(source_dir.glob("*post_gn3*.csv")),
-        "post_gn4": next(source_dir.glob("*post_gn4*.csv")),
-        "output": next(source_dir.glob("*output*.csv")),
-    }
-    df_initial = read_probe_file(probe_files["initial"])
-    df_post_gn1 = read_probe_file(probe_files["post_gn1"])
-    df_post_gn2 = read_probe_file(probe_files["post_gn2"])
-    df_post_gn3 = read_probe_file(probe_files["post_gn3"])
-    df_post_gn4 = read_probe_file(probe_files["post_gn4"])
-    df_output = read_probe_file(probe_files["output"])
-    
-    probe_gradients = {
-        "@Initial Processing": df_initial,
-        "@After GN1": df_post_gn1,
-        "@After GN2": df_post_gn2,
-        "@After GN3": df_post_gn3,
-        "@After GN4": df_post_gn4,
-        "@After Output Head": df_output,
-    }
 
-    fig, ax = plot_gradient_histograms_overlay(
-        probe_gradients,
+# -----------------------------------------------------------------------------
+# Driver
+# -----------------------------------------------------------------------------
+def run(args):
+    stage_files = discover_stages(args.probe_dir)
+    print("Stages:", ", ".join(f"{k} ({p.name})" for k, p in stage_files.items()))
+
+    stage_frames = {}
+    for stage, path in stage_files.items():
+        print(f"  reading {path.name}")
+        stage_frames[stage] = read_probe_file(path)
+    check_aligned(stage_frames)
+    first = next(iter(stage_frames.values()))
+    n_events = int(first["event_id"].nunique())
+    print(f"{len(first):,} hits in {n_events:,} events, identical across "
+          f"{len(stage_frames)} stages.")
+
+    labels = {s: STAGE_LABELS.get(s, s) for s in stage_frames}
+
+    # Distribution of all stages
+    fig, _ = plot_gradient_histograms_overlay(
+        {labels[s]: frame for s, frame in stage_frames.items()},
         title="Gradient distribution across probing locations",
-        log_scale=1e-8,
+        log_scale=args.log_scale,
         Nbins=100,
-        save_dir=save_dir
-        )
+        save_dir=args.out_dir / "figures",
+    )
+    plt.close(fig)
 
-def extract_run_date(path) -> str:
-    """
-    Return the first YYYYMMDD date found in `path`,
-    e.g. '20261019' from '.../20261019_Fisher_depth_probe/...'.
-    """
-    import re
-    from datetime import datetime
+    # Selection
+    selection_name = args.selection_name or f"top{args.top_n}_min{args.min_stages}"
+    selection_dir = args.out_dir / "selections" / selection_name
+    stages = list(stage_frames)
 
-    for candidate in re.findall(r"(?<!\d)\d{8}(?!\d)", str(path)):
-        try:
-            datetime.strptime(candidate, "%Y%m%d")
-            return candidate
-        except ValueError:
-            continue
+    wide = track_top_hits(stage_frames, n=args.top_n, min_stages=args.min_stages)
+    plot_top_hits_evolution(
+        wide, stages, n=args.top_n, min_stages=args.min_stages,
+        labels=labels, save_dir=selection_dir,
+    )
 
-    raise ValueError(f"No YYYYMMDD date found in path: {path}")
+    selection = wide.reset_index()
+    selection["top_in"] = selection["top_in"].str.join(";")
+    events_csv = args.events_csv or (args.out_dir / "events.csv")
+    selection, index_info = attach_event_index(selection, Path(events_csv))
+    if not index_info["joined"]:
+        print(f"WARNING: no root file/entry in the selection: {index_info['reason']}")
 
-def main():
+    selection_dir.mkdir(parents=True, exist_ok=True)
+    selection_path = selection_dir / "selection.csv"
+    selection.to_csv(selection_path, index=False)
+
+    meta = {
+        "script": Path(__file__).name,
+        "created": datetime.now().isoformat(timespec="seconds"),
+        "probe_dir": str(args.probe_dir),
+        "stages": [
+            {"key": s, "label": labels[s], "file": str(stage_files[s]),
+             "n_rows": int(len(stage_frames[s]))}
+            for s in stages
+        ],
+        "n_hits": int(len(first)),
+        "n_events": n_events,
+        "criteria": {
+            "rule": ("per stage: hit with max |value| in each event, then the "
+                     "top_n events; union over stages, kept if in >= min_stages"),
+            "top_n": args.top_n,
+            "min_stages": args.min_stages,
+        },
+        "n_selected_hits": int(len(selection)),
+        "n_selected_events": int(selection["event_id"].nunique()),
+        "transform": {
+            "name": "signed_log10",
+            "formula": "z = sign(g) * log10(1 + |g| / scale)",
+            "scale": args.log_scale,
+        },
+        "colour_scale": colour_scale(stage_frames, args.log_scale),
+        "event_index": index_info,
+    }
+    with open(selection_dir / "selection_meta.json", "w", encoding="utf-8") as handle:
+        json.dump(meta, handle, indent=2)
+
+    print(f"\nSelected {meta['n_selected_hits']} hits in "
+          f"{meta['n_selected_events']} events.")
+    print(f"Wrote {selection_path}")
+
+
+def parse_args(argv=None):
+    parser = argparse.ArgumentParser(
+        description="Gradient distributions and hit selection for one probe run.",
+    )
+    parser.add_argument("--probe-dir", required=True, type=Path,
+                        help="directory with one CSV per probe stage")
+    parser.add_argument("--out-dir", required=True, type=Path,
+                        help="run directory on /ceph, e.g. /ceph/cjo/GradientProbe/runs/<run>")
+    parser.add_argument("--events-csv", type=Path, default=None,
+                        help="build_event_index.py output (default: <out-dir>/events.csv)")
+    parser.add_argument("--top-n", type=int, default=20,
+                        help="events taken per stage (default 20)")
+    parser.add_argument("--min-stages", type=int, default=1,
+                        help="keep hits in the top-n of at least this many stages (default 1)")
+    parser.add_argument("--log-scale", type=float, default=1e-8,
+                        help="scale of the signed_log10 transform (default 1e-8)")
+    parser.add_argument("--selection-name", default=None,
+                        help="sub-directory name (default top<n>_min<m>)")
+    return parser.parse_args(argv)
+
+
+def main(argv=None):
+    args = parse_args(argv)
     # plot style settings
     setMplParam()
     enable_histogram_counts()
-    
-    source_dir = Path(
-        "/work/cjo/e2ereco_topas/20261019_Fisher_depth_probe/Results/20261019_Fisher_depth_probe_per_hit/grad"
-        )
-    run_date = extract_run_date(source_dir)
-    save_dir = Path(
-        f"/ceph/cjo/GradientProbe/{run_date}"
-    )
-    save_dir.mkdir(parents=True, exist_ok=True)
-    run(source_dir=source_dir,save_dir=save_dir)
-    
-    
+    run(args)
+
+
 if __name__ == "__main__":
     main()
