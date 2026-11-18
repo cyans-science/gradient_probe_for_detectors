@@ -93,7 +93,11 @@ except ModuleNotFoundError as error:
         "run_gradient_hit_viewer.sh, which puts that folder on PYTHONPATH."
     ) from error
 # Shared with the statistics step: same stage names and the same transform.
-from gradient_statistics import STAGE_LABELS, discover_stages, latex_scientific, signed_log10
+from gradient_statistics import (STAGE_LABELS, 
+                                 discover_stages, 
+                                 find_dump_file,
+                                 latex_scientific, 
+                                 signed_log10)
 
 DEFAULT_CONVERTER = Path(
     "/work/cjo/e2ereco_bernoulli_reproduction/source/"
@@ -396,6 +400,8 @@ def annotate_hits(event_df, gradients, stages, log_scale) -> pd.DataFrame:
     for stage in stages:
         hits[f"g_{stage}"] = gradients[stage].to_numpy()
         hits[f"z_{stage}"] = signed_log10(hits[f"g_{stage}"], scale=log_scale)
+    if "beta" in gradients:
+        hits["beta"] = gradients["beta"].to_numpy()
     return hits
 
 
@@ -1457,6 +1463,8 @@ def save_event_hits_3d_html(
         f"<br>g {label} = %{{customdata[{3 + i}]:.3e}}"
         for i, (_, label) in enumerate(stages)
     )
+    beta_hover = (f"<br>beta = %{{customdata[{3 + len(stages)}]:.3f}}"
+            if "beta" in hits else "")
 
     # Per hit trace: its index, its object colour and its z values per stage.
     hit_traces, object_colours = [], []
@@ -1473,6 +1481,7 @@ def save_event_hits_3d_html(
             customdata = np.column_stack(
                 [group["hit_id"], energy, group["t_pid"]]
                 + [group[f"g_{key}"] for key, _ in stages]
+                + ([group["beta"]] if "beta" in group else [])
             )
 
             hit_traces.append(len(traces))
@@ -1750,6 +1759,15 @@ def render_event(event_id, *, row, gradients, converter, stages, log_scale, zmax
         "picked_for_stages": {s: int(r) for s, r in picked_ranks.items()},
         "checks": {"L5": l5},
     }
+    info["ringed_hits"] = {
+        s: {RINGS[sign]["label"]: {"hit_id": h,
+                                   "g": float(by_id.at[h, f"g_{s}"]),
+                                   "z": float(by_id.at[h, f"z_{s}"]),
+                                   **({"beta": float(by_id.at[h, "beta"])}
+                                      if "beta" in by_id else {})}
+            for sign, h in ext.items()}
+        for s, ext in rings.items()
+    }
     out_dir.mkdir(parents=True, exist_ok=True)
     with open(out_dir / "event_info.json", "w", encoding="utf-8") as handle:
         json.dump(info, handle, indent=2)
@@ -1873,11 +1891,14 @@ def run(args):
         stage_files = {s["key"]: Path(s["file"]) for s in selection_meta["stages"]}
         log_scale = selection_meta["transform"]["scale"]
         zmax = max(selection_meta["colour_scale"]["abs_z_p999"].values())
+        beta_file = selection_meta.get("beta_file")
     elif args.probe_dir is not None:
         stage_files = discover_stages(args.probe_dir)
         log_scale, zmax = args.log_scale, None
+        beta_file = find_dump_file(args.probe_dir, "beta.csv")
     else:
         raise ValueError("No selection in the run directory: pass --probe-dir.")
+    
     if args.zmax is not None:
         zmax = args.zmax
     stages = list(stage_files)
@@ -1922,7 +1943,10 @@ def run(args):
 
     print(f"Events: {event_ids}\nStages: {stages}\n"
           f"Colour scale: |z| <= {zmax if zmax is not None else 'per event'}")
-    gradients = read_event_gradients(stage_files, event_ids)
+    per_hit_files = dict(stage_files)
+    if beta_file is not None:
+        per_hit_files["beta"] = Path(beta_file)   # read like a stage, not drawn as one
+    gradients = read_event_gradients(per_hit_files, event_ids)
     converter = load_converter(args.converter)
 
     for event_id in event_ids:

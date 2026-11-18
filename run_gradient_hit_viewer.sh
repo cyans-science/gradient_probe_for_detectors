@@ -13,10 +13,10 @@ SOURCE_DIR=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd -P )
 UTILS_DIR=/work/cjo/Utils   # PlotUtils.py, ExternalFunctions.py
 
 ARGS=(
-    --run-dir   /ceph/cjo/GradientProbe/runs/20261019_Fisher_depth_probe
+    --run-dir   /ceph/cjo/GradientProbe/runs/20261113_Fisher_depth_probe
     --converter /work/cjo/e2ereco_bernoulli_reproduction/source/modules/datastructures/TrainData_DICE_cellparent.py
     --fps 2
-    --selection top20_min1 --events-per-stage 20
+    --selection top30_min1 --events-per-stage 30
 )
 
 apptainer exec \

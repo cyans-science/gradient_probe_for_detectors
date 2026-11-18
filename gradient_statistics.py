@@ -22,11 +22,13 @@ figures/gradient_histograms_overlay.{png,pdf}
 selections/<name>/selection.csv
 selections/<name>/selection_meta.json   criteria, stages, transform, colour scale
 selections/<name>/top_hits_evolution.{png,pdf}
+selections/<name>/per_event_histograms/<event_id>.{png,pdf}   (--per-event-histograms)
 
 Gradients are used as written by fisher_val_loop, without per-batch
 normalisation.
 
 cyan.jo, 2026-10-21 (restructured from the earlier analysis script)
+cyan.jo, Claude Sonnet 4.6, 2026-11-09 (per-event histograms)
 """
 from __future__ import annotations
 
@@ -49,53 +51,93 @@ except ModuleNotFoundError as error:
         "script through its run_*.sh wrapper, which puts that folder on PYTHONPATH."
     ) from error
 
-# Probe locations in forward order, and their plot labels.
-STAGE_ORDER = [
-    "input", "post_initial",
-    "post_gn1", "post_gn2", "post_gn3", "post_gn4",
-    "post_output_head",
-]
-STAGE_LABELS = {
-    "input": "@Input",
-    "post_initial": "@Initial Processing",
-    "post_gn1": "@After GN1",
-    "post_gn2": "@After GN2",
-    "post_gn3": "@After GN3",
-    "post_gn4": "@After GN4",
-    "post_output_head": "@After Output Head",
-}
-EVENT_INDEX_COLUMNS = ["root_file", "entry", "djctd_file", "local_idx", "n_hits"]
 
+# Every probe location the training scripts have used, in network order.
+# Inside block N: prop_gnN (sender gate, before kNN) -> agg_gnN (old: after
+# aggregation) -> post_gnN (old: after BN2). A run lists only some of them.
+N_BLOCKS = 4
+STAGE_ORDER = ["input", "post_initial"]
+STAGE_LABELS = {"input": "@Input", "post_initial": "@Initial Processing"}
+for _i in range(1, N_BLOCKS + 1):
+    STAGE_ORDER += [f"prop_gn{_i}", f"agg_gn{_i}", f"post_gn{_i}"]
+    STAGE_LABELS.update({
+        f"prop_gn{_i}": f"@GN{_i} Pre-aggregation",
+        f"agg_gn{_i}": f"@GN{_i} Aggregation",
+        f"post_gn{_i}": f"@After GN{_i}",
+    })
+STAGE_ORDER.append("post_output_head")
+STAGE_LABELS["post_output_head"] = "@After Output Head"
+NON_STAGE_FILES = {"beta"}   # per-hit CSVs in the dump that are not gradients
+EVENT_INDEX_COLUMNS = ["root_file", "entry", "djctd_file", "local_idx", "n_hits"]
 
 # -----------------------------------------------------------------------------
 # Reading and checking the probe tables
 # -----------------------------------------------------------------------------
-def discover_stages(probe_dir) -> dict:
-    """Stage key -> CSV path for every CSV in probe_dir, in forward order.
+def find_dump_file(probe_dir, name):
+    """<name> in the probe directory or its parent.
 
-    A file belongs to the longest known stage key contained in its name
-    (so prefixed names like 'run_post_gn1.csv' work). Unknown names are kept
-    under their own stem and placed after the known stages.
+    The training dump is <dump>/grad/<stage>.csv next to <dump>/beta.csv
+    and <dump>/meta.json, so --probe-dir may be either <dump>/grad or an
+    older flat probe directory.
     """
-    files = sorted(Path(probe_dir).glob("*.csv"))
+    probe_dir = Path(probe_dir)
+    for directory in (probe_dir, probe_dir.parent):
+        if (directory / name).is_file():
+            return directory / name
+    return None
+
+
+def read_dump_meta(probe_dir):
+    """meta.json of the training dump (with "_path" added), or None."""
+    path = find_dump_file(probe_dir, "meta.json")
+    if path is None:
+        return None
+    with open(path, encoding="utf-8") as handle:
+        meta = json.load(handle)
+    if "locations" not in meta:
+        return None
+    meta["_path"] = str(path)
+    return meta
+
+
+def discover_stages(probe_dir, only=None) -> dict:
+    """Stage key -> CSV path, in network order.
+
+    A stage is a CSV whose name without .csv is a probe location. Known
+    locations are ordered by STAGE_ORDER (meta.json's order is not network
+    order for every run); unknown ones follow, with a warning. If the dump's
+    meta.json lists locations, each must have a file and other CSVs are
+    ignored. only: keep just these stages.
+    """
+    probe_dir = Path(probe_dir)
+    files = {p.stem: p for p in sorted(probe_dir.glob("*.csv"))
+             if p.stem not in NON_STAGE_FILES}
     if not files:
-        raise FileNotFoundError(f"No CSV files in {probe_dir}")
+        raise FileNotFoundError(f"No probe CSV files in {probe_dir}")
 
-    keys_longest_first = sorted(STAGE_ORDER, key=len, reverse=True)
-    stages = {}
-    for path in files:
-        key = next((k for k in keys_longest_first if k in path.stem), path.stem)
-        if key in stages:
-            raise ValueError(f"{path.name} and {stages[key].name} both match stage {key!r}")
-        stages[key] = path
+    meta = read_dump_meta(probe_dir)
+    listed = list(meta["locations"]) if meta else []
+    if listed:
+        missing = [s for s in listed if s not in files]
+        if missing:
+            raise FileNotFoundError(
+                f"{meta['_path']} lists {missing}, but {probe_dir} has no CSV for them")
+        extra = sorted(set(files) - set(listed))
+        if extra:
+            print(f"WARNING: CSVs not listed in {meta['_path']}, ignored: {extra}")
+        files = {s: files[s] for s in listed}
 
-    def position(key):
-        return (STAGE_ORDER.index(key) if key in STAGE_ORDER else len(STAGE_ORDER), key)
-
-    unknown = [k for k in stages if k not in STAGE_ORDER]
+    unknown = [s for s in (listed or sorted(files)) if s not in STAGE_ORDER]
     if unknown:
-        print(f"WARNING: unknown stage names {unknown}, placed after the known stages.")
-    return {key: stages[key] for key in sorted(stages, key=position)}
+        print(f"WARNING: stages not in STAGE_ORDER, placed last: {unknown}")
+    order = [s for s in STAGE_ORDER if s in files] + unknown
+
+    if only:
+        bad = [s for s in only if s not in files]
+        if bad:
+            raise ValueError(f"--stages {bad} not in {probe_dir}; found {order}")
+        order = [s for s in order if s in only]
+    return {s: files[s] for s in order}
 
 
 def read_probe_file(probe_file):
@@ -774,11 +816,115 @@ def plot_gradient_histograms_overlay(
     return fig, ax
 
 
+def plot_per_event_gradient_histograms(
+    stage_frames: dict,
+    selected_event_ids,
+    labels: dict | None = None,
+    log_scale: float = 1e-8,
+    Nbins: int = 100,
+    save_dir=None,
+    formats=("png", "pdf"),
+    dpi: int = 300,
+    events_meta: dict | None = None,
+):
+    """
+    One overlay histogram per selected event, all stages on the same axis.
+
+    Parameters
+    ----------
+    stage_frames : dict[str, pd.DataFrame]
+        Stage key -> full probe DataFrame (event_id, hit_id, value).
+        Must be row-aligned (check_aligned passed).
+    selected_event_ids : iterable of int
+        Events to plot, e.g. selection["event_id"].unique().
+    labels : dict[str, str], optional
+        Stage key -> display label.  Defaults to the key itself.
+    log_scale : float
+        Scale for the signed_log10 transform; must match the collective plot.
+    Nbins : int
+        Number of histogram bins.
+    save_dir : str or Path, optional
+        Directory for output files; created if absent.
+        Files are written as <save_dir>/<event_id>.{fmt}.
+    formats : tuple of str
+        Output file formats.
+    dpi : int
+        Resolution for raster formats.
+    events_meta : dict, optional
+        event_id (int) -> dict with optional keys "root_file", "entry", "n_hits".
+        Used to enrich the figure title.  Build from selection after
+        attach_event_index():
+            events_meta = (
+                selection[["event_id", "root_file", "entry", "n_hits"]]
+                .drop_duplicates("event_id")
+                .set_index("event_id")
+                .to_dict("index")
+            )
+    """
+    if save_dir is not None:
+        save_dir = Path(save_dir)
+        save_dir.mkdir(parents=True, exist_ok=True)
+
+    stages = list(stage_frames)
+    labels = labels or {}
+
+    # Pre-build arrays so filtering is a single boolean mask per event.
+    # All frames are row-aligned, so one event_id column is enough.
+    event_id_array = next(iter(stage_frames.values()))["event_id"].to_numpy()
+    value_arrays = {s: stage_frames[s]["value"].to_numpy() for s in stages}
+
+    selected_event_ids = sorted(set(int(e) for e in selected_event_ids))
+    n_events = len(selected_event_ids)
+    print(f"Plotting per-event histograms for {n_events} events ...")
+
+    for event_id in selected_event_ids:
+        mask = event_id_array == event_id
+        n_hits = int(mask.sum())
+        if n_hits == 0:
+            print(f"  WARNING: event_id={event_id} has no hits in the probe CSVs; skipped.")
+            continue
+
+        event_datasets = {
+            labels.get(s, s): pd.DataFrame({"value": value_arrays[s][mask]})
+            for s in stages
+        }
+
+        # Title: event_id + n_hits + root provenance if events.csv was joined.
+        meta = (events_meta or {}).get(event_id, {})
+        title_parts = [f"Event {event_id}  ({n_hits} hits)"]
+        if meta.get("root_file"):
+            title_parts.append(
+                f"{Path(meta['root_file']).stem}  entry {meta.get('entry', '?')}"
+            )
+        title = "  |  ".join(title_parts)
+
+        fig, _ = plot_gradient_histograms_overlay(
+            datasets=event_datasets,
+            title=title,
+            log_scale=log_scale,
+            Nbins=Nbins,
+            xlim=None,
+            save_dir=None,  # save manually below to control filename
+        )
+
+        if save_dir is not None:
+            for fmt in formats:
+                out_path = save_dir / f"{event_id}.{fmt}"
+                fig.savefig(out_path, dpi=dpi, bbox_inches="tight")
+            fmt_str = "/".join(formats)
+            print(f"  event {event_id:>6d}: {save_dir}/{event_id}.{{{fmt_str}}}")
+
+        plt.close(fig)
+
+    print(f"Done.  Per-event histograms written to {save_dir}")
+
+
 # -----------------------------------------------------------------------------
 # Driver
 # -----------------------------------------------------------------------------
 def run(args):
-    stage_files = discover_stages(args.probe_dir)
+    stage_files = discover_stages(args.probe_dir, only=args.stages)
+    dump_meta = read_dump_meta(args.probe_dir)
     print("Stages:", ", ".join(f"{k} ({p.name})" for k, p in stage_files.items()))
 
     stage_frames = {}
@@ -786,10 +932,18 @@ def run(args):
         print(f"  reading {path.name}")
         stage_frames[stage] = read_probe_file(path)
     check_aligned(stage_frames)
-    first = next(iter(stage_frames.values()))
+    first_stage = next(iter(stage_frames))
+    first = stage_frames[first_stage]
     n_events = int(first["event_id"].nunique())
     print(f"{len(first):,} hits in {n_events:,} events, identical across "
           f"{len(stage_frames)} stages.")
+
+    beta_file = find_dump_file(args.probe_dir, "beta.csv")
+    beta_frame = None
+    if beta_file is not None:
+        beta_frame = read_probe_file(beta_file)
+        check_aligned({first_stage: first, "beta": beta_frame})
+        print(f"  beta from {beta_file}")
 
     labels = {s: STAGE_LABELS.get(s, s) for s in stage_frames}
 
@@ -816,6 +970,11 @@ def run(args):
 
     selection = wide.reset_index()
     selection["top_in"] = selection["top_in"].str.join(";")
+    if beta_frame is not None:
+        selection = selection.merge(
+            beta_frame.rename(columns={"value": "beta"}),
+            on=["event_id", "hit_id"], how="left", validate="one_to_one",
+        )
     events_csv = args.events_csv or (args.out_dir / "events.csv")
     selection, index_info = attach_event_index(selection, Path(events_csv))
     if not index_info["joined"]:
@@ -851,6 +1010,11 @@ def run(args):
         },
         "colour_scale": colour_scale(stage_frames, args.log_scale),
         "event_index": index_info,
+        "beta_file": str(beta_file) if beta_file is not None else None,
+        "dump": ({k: dump_meta.get(k) for k in
+                  ("_path", "checkpoint", "epoch", "val_loss_at_selection",
+                   "bn_frozen", "locations")}
+                 if dump_meta else None),
     }
     with open(selection_dir / "selection_meta.json", "w", encoding="utf-8") as handle:
         json.dump(meta, handle, indent=2)
@@ -858,6 +1022,32 @@ def run(args):
     print(f"\nSelected {meta['n_selected_hits']} hits in "
           f"{meta['n_selected_events']} events.")
     print(f"Wrote {selection_path}")
+
+    # ------------------------------------------------------------------
+    # Per-event histograms (opt-in via --per-event-histograms)
+    # ------------------------------------------------------------------
+    if args.per_event_histograms:
+        meta_cols = [c for c in ("root_file", "entry", "n_hits") if c in selection.columns]
+        if meta_cols:
+            events_meta = (
+                selection[["event_id"] + meta_cols]
+                .drop_duplicates("event_id")
+                .set_index("event_id")
+                .to_dict("index")
+            )
+        else:
+            events_meta = None
+
+        plot_per_event_gradient_histograms(
+            stage_frames=stage_frames,
+            selected_event_ids=selection["event_id"].unique(),
+            labels=labels,
+            log_scale=args.log_scale,
+            Nbins=100,
+            save_dir=selection_dir / "per_event_histograms",
+            formats=("png", "pdf"),
+            events_meta=events_meta,
+        )
 
 
 def parse_args(argv=None):
@@ -878,6 +1068,23 @@ def parse_args(argv=None):
                         help="scale of the signed_log10 transform (default 1e-8)")
     parser.add_argument("--selection-name", default=None,
                         help="sub-directory name (default top<n>_min<m>)")
+    parser.add_argument(
+        "--per-event-histograms",
+        action="store_true",
+        default=False,
+        help=(
+            "Plot one overlay histogram per selected event (all stages) "
+            "in selections/<name>/per_event_histograms/. "
+            "Off by default; the collective overlay is always produced."
+        ),
+    )
+    parser.add_argument(
+        "--stages", 
+        nargs="+", 
+        default=None,
+        help="probe locations to analyse, e.g. post_initial prop_gn1 "
+                "prop_gn2 prop_gn3 prop_gn4 post_output_head "
+                "(default: every stage in --probe-dir)")
     return parser.parse_args(argv)
 
 
