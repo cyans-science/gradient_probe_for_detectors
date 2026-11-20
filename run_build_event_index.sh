@@ -10,7 +10,7 @@
 CONTAINER=/ceph/cjo/containers/plotting.sif
 SOURCE_DIR=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd -P )
 # PROBE_DIR=/work/cjo/e2ereco_topas/20261019_Fisher_depth_probe/Results/20261019_Fisher_depth_probe_per_hit/grad
-PROBE_DIR=/work/cjo/e2ereco_local/20261113_Fisher_depth_probe/Results/20261113_Fisher_depth_probe_per_hit/grad
+PROBE_DIR=/work/cjo/e2ereco_local/20261118_Fisher_depth_probe/Results/20261118_Fisher_depth_probe_per_hit/grad
 
 ARGS=(
     --djcdc     /ceph/cjo/DICEv1_4_0_small/SingleJet_pt30_eta1p2_1p7_100k/ten_files_conversion/dataCollection.djcdc
@@ -18,7 +18,7 @@ ARGS=(
     --root-dir  /ceph/cjo/DICEv1_4_0/SingleJet_pt30_eta1p2_1p7_100k
     --probe-csv "${PROBE_DIR}/prop_gn1.csv"   # any one stage: all stages list the same hits
     # --out-dir   /ceph/cjo/GradientProbe/runs/20261019_Fisher_depth_probe
-    --out-dir   /ceph/cjo/GradientProbe/runs/20261113_Fisher_depth_probe
+    --out-dir   /ceph/cjo/GradientProbe/runs/20261118_Fisher_depth_probe
 )
 
 apptainer exec \

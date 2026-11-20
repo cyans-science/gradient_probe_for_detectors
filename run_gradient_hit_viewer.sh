@@ -13,7 +13,7 @@ SOURCE_DIR=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd -P )
 UTILS_DIR=/work/cjo/Utils   # PlotUtils.py, ExternalFunctions.py
 
 ARGS=(
-    --run-dir   /ceph/cjo/GradientProbe/runs/20261113_Fisher_depth_probe
+    --run-dir   /ceph/cjo/GradientProbe/runs/20261118_Fisher_depth_probe
     --converter /work/cjo/e2ereco_bernoulli_reproduction/source/modules/datastructures/TrainData_DICE_cellparent.py
     --fps 2
     --selection top30_min1 --events-per-stage 30
@@ -26,3 +26,6 @@ apptainer exec \
     --pwd "${SOURCE_DIR}" \
     "${CONTAINER}" \
     python3 gradient_hit_viewer.py "${ARGS[@]}" "$@"
+
+## /ceph/jkiesele/datasets/dice/qcd_singlejet_pt20-200_eta3_noPromptLep/merged_global_tR0p65/djc/dataCollection.djcdc
+## 6439 sec = 1h 47m 19s 

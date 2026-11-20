@@ -520,7 +520,8 @@ def marker_size(energy):
 def particle_label(pid):
     try:
         name = Particle.from_pdgid(int(pid)).latex_name
-    except (ValueError, LookupError, AttributeError):
+    # InvalidParticle / ParticleNotFound of the particle package are RuntimeErrors.
+    except (ValueError, LookupError, AttributeError, RuntimeError):
         return f"PID {int(pid)}"
     return name if name.startswith("$") else f"${name}$"
 
@@ -528,7 +529,7 @@ def particle_label(pid):
 def particle_name(pid):
     try:
         return Particle.from_pdgid(int(pid)).name
-    except (ValueError, LookupError, AttributeError):
+    except (ValueError, LookupError, AttributeError, RuntimeError):
         return f"PID {int(pid)}"
 
 
@@ -1510,6 +1511,7 @@ def save_event_hits_3d_html(
                     "t_pid=%{customdata[2]:d}<br>"
                     f"x=%{{x:.1f}}, y=%{{y:.1f}}, z=%{{z:.1f}}{unit_label}"
                     f"{stage_hover}"
+                    f"{beta_hover}"
                     "<extra></extra>"
                 ),
             ))
@@ -1759,15 +1761,6 @@ def render_event(event_id, *, row, gradients, converter, stages, log_scale, zmax
         "picked_for_stages": {s: int(r) for s, r in picked_ranks.items()},
         "checks": {"L5": l5},
     }
-    info["ringed_hits"] = {
-        s: {RINGS[sign]["label"]: {"hit_id": h,
-                                   "g": float(by_id.at[h, f"g_{s}"]),
-                                   "z": float(by_id.at[h, f"z_{s}"]),
-                                   **({"beta": float(by_id.at[h, "beta"])}
-                                      if "beta" in by_id else {})}
-            for sign, h in ext.items()}
-        for s, ext in rings.items()
-    }
     out_dir.mkdir(parents=True, exist_ok=True)
     with open(out_dir / "event_info.json", "w", encoding="utf-8") as handle:
         json.dump(info, handle, indent=2)
@@ -1790,10 +1783,14 @@ def render_event(event_id, *, row, gradients, converter, stages, log_scale, zmax
     # largest positive z and the hit with the most negative z.
     rings = {s: extreme_hits(hits, s) for s in stages}
     by_id = hits.set_index("hit_id")
+    rings = {s: extreme_hits(hits, s) for s in stages}
+    by_id = hits.set_index("hit_id")
     info["ringed_hits"] = {
         s: {RINGS[sign]["label"]: {"hit_id": h,
                                    "g": float(by_id.at[h, f"g_{s}"]),
-                                   "z": float(by_id.at[h, f"z_{s}"])}
+                                   "z": float(by_id.at[h, f"z_{s}"]),
+                                   **({"beta": float(by_id.at[h, "beta"])}
+                                      if "beta" in by_id else {})}
             for sign, h in ext.items()}
         for s, ext in rings.items()
     }

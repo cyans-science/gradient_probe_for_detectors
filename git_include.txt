@@ -12,3 +12,5 @@ diagnostics/compare_djctd_root.py
 diagnostics/run_compare_djcdt_root.sh
 diagnostics/argmax_position.py
 diagnostics/run_argmax_position.sh
+beta_statistics.py
+run_beta_statistics.sh
