@@ -39,9 +39,10 @@ set -euo pipefail
 # ============================== Run settings ==============================
 # Everything that changes from run to run. Each line keeps a value already
 # set in the environment.
-RUN_NAME=${RUN_NAME:-20261119_Fisher_probe_gross}
+RUN_NAME=${RUN_NAME:-20261126_gradient_probe}
 # Where the training ran: e2ereco_local or e2ereco_topas.
-TRAIN_BASE=${TRAIN_BASE:-/work/cjo/e2ereco_topas}
+# TRAIN_BASE=${TRAIN_BASE:-/work/cjo/e2ereco_topas}
+TRAIN_BASE=${TRAIN_BASE:-/work/cjo/topas_gradient_probe}
 DUMP_DIR=${DUMP_DIR:-${TRAIN_BASE}/${RUN_NAME}/Results/${RUN_NAME}_per_hit}
 PROBE_DIR=${PROBE_DIR:-${DUMP_DIR}/grad}
 BETA_FILE=${BETA_FILE:-${DUMP_DIR}/beta.csv}
@@ -51,17 +52,17 @@ LOG_DIR=${LOG_DIR:-${RUN_DIR}/logs}
 # that made the .djctd files.
 DJCDC=${DJCDC:-/ceph/jkiesele/datasets/dice/qcd_singlejet_pt20-200_eta3_noPromptLep/merged_global_tR0p65/djc/dataCollection.djcdc}
 ROOT_DIR=${ROOT_DIR:-/ceph/jkiesele/datasets/dice/qcd_singlejet_pt20-200_eta3_noPromptLep/merged_global_tR0p65}
-CONVERTER=${CONVERTER:-/work/cjo/e2ereco_bernoulli_reproduction/source/modules/datastructures/TrainData_DICE_cellparent.py}
+CONVERTER=${CONVERTER:-/work/cjo/e2ereco_gradient_probe/e2ereco_gradient_probe/modules/datastructures/TrainData_DICE_cellparent.py}
 # Loader settings of the training script; they fix the event_id order.
 BATCH_SIZE=${BATCH_SIZE:-10000}
 VAL_FRACTION=${VAL_FRACTION:-0.2}
 # Probe stages in network order (= CSV names in PROBE_DIR). YYYYMMDD probes
 # block N at prop_gnN (sender gate, before the kNN aggregation).
-STAGES=${STAGES:-prop_gn1 prop_gn2 prop_gn3 prop_gn4 post_output_head}
+STAGES=${STAGES:-gradient_gn1 gradient_gn2 gradient_gn3 gradient_gn4 gradient_post_output}
 # Selection: the viewer's --selection is derived, so it always names the
 # selection that the statistics step of this call writes.
-TOP_N=${TOP_N:-30}
-MIN_STAGES=${MIN_STAGES:-1}
+TOP_N=${TOP_N:-20}
+MIN_STAGES=${MIN_STAGES:-2}
 EVENTS_PER_STAGE=${EVENTS_PER_STAGE:-30}
 SELECTION=${SELECTION:-top${TOP_N}_min${MIN_STAGES}}
 SETTINGS=(RUN_NAME DUMP_DIR PROBE_DIR BETA_FILE RUN_DIR LOG_DIR

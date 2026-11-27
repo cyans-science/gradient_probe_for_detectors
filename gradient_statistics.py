@@ -391,11 +391,11 @@ def original_plot_gradient_histogram(df:pd.DataFrame, xlim=None):
     if xlim is not None:
         ax.set_xlim(xlim)
 
-def signed_log10(values, scale=1e-6):
+def signed_log10(values, scale=1e-8):
     values = np.asarray(values, dtype=np.float64)
     return np.sign(values) * np.log10(1 + np.abs(values) / scale)
 
-def inverse_signed_log10(z, scale=1e-6):
+def inverse_signed_log10(z, scale=1e-8):
     z = np.asarray(z, dtype=np.float64)
     return np.sign(z) * scale * (10**np.abs(z) - 1)
 

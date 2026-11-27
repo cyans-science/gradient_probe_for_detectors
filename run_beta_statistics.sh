@@ -20,12 +20,16 @@ ARGS=(
     # --probe-dir /work/cjo/e2ereco_local/20261118_Fisher_depth_probe/Results/20261118_Fisher_depth_probe_per_hit/grad
     # --beta-file /work/cjo/e2ereco_local/20261118_Fisher_depth_probe/Results/20261118_Fisher_depth_probe_per_hit/beta.csv
     # --out-dir   /ceph/cjo/GradientProbe/runs/20261118_Fisher_depth_probe
-    --probe-dir /work/cjo/e2ereco_topas/20261119_Fisher_probe_gross/Results/20261119_Fisher_probe_gross_per_hit/grad
-    --beta-file /work/cjo/e2ereco_topas/20261119_Fisher_probe_gross/Results/20261119_Fisher_probe_gross_per_hit/beta.csv
-    --out-dir   /ceph/cjo/GradientProbe/runs/20261119_Fisher_probe_gross
+    # --probe-dir /work/cjo/e2ereco_topas/20261119_Fisher_probe_gross/Results/20261119_Fisher_probe_gross_per_hit/grad
+    # --beta-file /work/cjo/e2ereco_topas/20261119_Fisher_probe_gross/Results/20261119_Fisher_probe_gross_per_hit/beta.csv
+    # --out-dir   /ceph/cjo/GradientProbe/runs/20261119_Fisher_probe_gross
+    # --stages prop_gn1 prop_gn2 prop_gn3 prop_gn4 post_output_head
+    --probe-dir /work/cjo/topas_gradient_probe/20261126_gradient_probe/Results/20261126_gradient_probe_per_hit/grad
+    --beta-file /work/cjo/topas_gradient_probe/20261126_gradient_probe/Results/20261126_gradient_probe_per_hit/beta.csv
+    --out-dir   /ceph/cjo/GradientProbe/runs/20261126_gradient_probe
     # init, gn1-gn4, output. 20261118 probes block N at prop_gnN (sender gate,
     # before the kNN aggregation), not post_gnN; names = CSV names in --probe-dir.
-    --stages prop_gn1 prop_gn2 prop_gn3 prop_gn4 post_output_head
+    --stages gradient_gn1 gradient_gn2 gradient_gn3 gradient_gn4 gradient_post_output
 )
 
 apptainer exec \

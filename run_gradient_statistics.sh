@@ -17,8 +17,8 @@ UTILS_DIR=/work/cjo/Utils   # PlotUtils.py, ExternalFunctions.py
 # /work/cjo/e2ereco_topas/20261019_Fisher_depth_probe/Results/20261019_Fisher_depth_probe_per_hit/grad
 
 ARGS=(
-    --probe-dir  /work/cjo/e2ereco_local/20261118_Fisher_depth_probe/Results/20261118_Fisher_depth_probe_per_hit/grad
-    --out-dir    /ceph/cjo/GradientProbe/runs/20261118_Fisher_depth_probe
+    --probe-dir  /work/cjo/topas_gradient_probe/20261126_gradient_probe/Results/20261126_gradient_probe_per_hit/grad
+    --out-dir    /ceph/cjo/GradientProbe/runs/20261126_gradient_probe
     --top-n      30
     --min-stages 1
     --per-event-histograms 

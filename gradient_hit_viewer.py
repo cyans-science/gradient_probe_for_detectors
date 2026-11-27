@@ -140,25 +140,53 @@ RINGS = {
 # =============================================================================
 # Data access
 # =============================================================================
-def load_converter(path):
-    """Instance of TrainData_DICE_cellparent, imported from its file."""
-    spec = importlib.util.spec_from_file_location("TrainData_DICE_cellparent", path)
+def load_converter(path, class_name="TrainData_DICE_cellparent"):
+    """Converter instance from its file, or None for "none"."""
+    if str(path).lower() == "none":
+        return None
+    spec = importlib.util.spec_from_file_location("dice_converter", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    return module.TrainData_DICE_cellparent()
+    converter = getattr(module, class_name)()
+    if not (hasattr(converter, "convertevent") or hasattr(converter, "convert")):
+        raise SystemExit(f"{path}: {class_name} has neither convertevent nor convert; "
+                         "pass another converter, or --converter none.")
+    return converter
 
 
 def load_converted_event(root_file, entry, converter) -> pd.DataFrame:
-    """Converted hits of one root entry, row order as produced by the converter."""
-    with uproot.open(root_file) as f:
-        hits = f["Hits"].arrays(entry_start=entry, entry_stop=entry + 1, library="ak")
-        showers = f["SimShowers"].arrays(entry_start=entry, entry_stop=entry + 1, library="ak")
+    """Converted hits of one root entry, in the converter's row order.
 
+    Two converter versions:
+      * convertevent(hits, showers): old per-event conversion (DICE v1.4.0
+        SingleJet); entries without SimShowers give 0 rows.
+      * convert(hits, showers, tracks): pure conversion of the pftruth output
+        (e2ereco 20b6cd2 and later); cells, then track pseudo-hits; deterministic.
+    """
+    window = dict(entry_start=entry, entry_stop=entry + 1)
+    if hasattr(converter, "convertevent"):
+        with uproot.open(root_file) as f:
+            hits = f["Hits"].arrays(library="ak", **window)
+            showers = f["SimShowers"].arrays(library="ak", **window)
+        if len(hits) != 1:
+            raise IndexError(f"{root_file} has no entry {entry}")
+        if len(showers["sim_shower_pdg_id"][0]) == 0:
+            return pd.DataFrame()  # no SimShowers -> 0 converted rows
+        return converter.convertevent(hits[0], showers[0]).reset_index(drop=True)
+
+    with uproot.open(root_file) as f:
+        hits = f["Hits"].arrays(converter.HIT_BRANCHES, **window)
+        showers = f["SimShowers"].arrays(converter.SHOWER_BRANCHES, **window)
+        tracks = f["Tracks"].arrays(converter.TRACK_BRANCHES, **window)
     if len(hits) != 1:
         raise IndexError(f"{root_file} has no entry {entry}")
-    if len(showers["sim_shower_pdg_id"][0]) == 0:
-        return pd.DataFrame()  # no SimShowers -> 0 converted rows
-    return converter.convertevent(hits[0], showers[0]).reset_index(drop=True)
+    feat, truth, _ = converter.convert(hits, showers, tracks)
+    # Column layout of recHitFeatures: 0 energy, 5-7 x, y, z (see the converter docstring).
+    return pd.DataFrame({
+        "recHitEnergy": feat[:, 0], "recHitX": feat[:, 5],
+        "recHitY": feat[:, 6], "recHitZ": feat[:, 7],
+        "t_idx": truth["t_idx"][:, 0], "t_pid": truth["t_pid"][:, 0],
+    })
 
 
 def load_converted_events(root_file, converter, max_events=None):
@@ -1994,6 +2022,9 @@ def parse_args(argv=None):
                         help="signed_log10 scale, only used without a selection")
     parser.add_argument("--converter", type=Path, default=DEFAULT_CONVERTER,
                         help="file defining TrainData_DICE_cellparent")
+    parser.add_argument("--converter-class", default="TrainData_DICE_cellparent",
+                    help="converter class in --converter; TrainData_DICE_cellparent_global "
+                            "for globally merged datasets (default TrainData_DICE_cellparent)")
     return parser.parse_args(argv)
 
 

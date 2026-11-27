@@ -23,12 +23,40 @@ with each of them:
     hit counts (shown, z > 0, z < 0).
   * The same scatters (without marginals) of all stages in one figure, one
     panel per stage, shared axes and one common z axis label.
+  * Zone tracking: boxes in the (z, beta) plane of one reference stage
+    (ZONES, REF_STAGE) mark groups of hits; each zone keeps its colour
+    (getColour(i), i = position in ZONES) at every stage, over a grey
+    background of the shown hits that are in no zone. beta is the same for a hit at every
+    stage, so a zone's hits can only move along z. Two figures: the (z, beta)
+    scatter of every stage with the zones coloured (boxes drawn on the
+    reference panel), and z at the reference stage against z at every other
+    stage (diagonal = unchanged, anti-diagonal quadrants = sign flipped).
+    The zone boxes are drawn on every panel of the (z, beta) figure (dashed
+    on the reference, dotted elsewhere); next to each box (ZONE_TEXT_POS)
+    the hits inside it at that stage, one line per reference zone in that
+    zone's colour and labelled by its origin (ORIGIN_LABEL, "from A"), then
+    "none" (in no zone at the reference). Only zones whose beta range
+    overlaps the box are listed: beta does not change between stages, so
+    the others would always count 0.
+    Each zone is drawn with at most N_ZONE_DRAW random hits, the same hits
+    at every stage; the drawn hits of all zones form one layer in a fixed
+    random order, so no zone covers another. Each panel gives, per zone, the fraction of its hits
+    with z > 0 (over all of the zone's hits, not only the drawn ones). A
+    hit inside several boxes belongs to the first one in ZONES.
   * The (z, beta) population density of all stages in one figure: a 2D
     histogram per stage over the same N_SCATTER hits as the scatters,
     DENSITY_NBINS x DENSITY_NBINS bins, z in [-lim, lim] with lim = max |z|
     over all stages and these hits (or --zlim), beta in [0, 1]. Shared bins, axes
     and colour scale (YlGnBu, log counts unless --linear-counts), one colour
     bar; empty bins stay blank.
+  * The same density with one sign of z per figure: z < 0 in
+    z_vs_beta_density_negative, z > 0 in z_vs_beta_density_positive. Each
+    side has DENSITY_NBINS z bins over its own range, [-lim_-, 0] and
+    [0, lim_+] (lim = largest |z| of that sign over all stages and the shown
+    hits, or --zlim), so twice the z resolution of the two-sided figure.
+    Hits with z = 0 (g = 0) are in neither figure; each panel gives their
+    number. Both figures share one colour scale, so their densities compare
+    directly.
   * The same density figure with the raw gradient g instead of z: linear
     g bins over [-glim, glim], glim = max |g| over all stages and the same
     N_SCATTER hits (or --glim), same beta bins, colour map and colour scale rules. It shows
@@ -38,14 +66,29 @@ with each of them:
 Inputs: the stage CSVs in --probe-dir and the beta CSV of the same dump
 (--beta-file; without it, beta.csv in --probe-dir or its parent, as in
 gradient_statistics.py). Rows of the beta CSV must align with the stage CSVs.
+Because all CSVs have the same rows, a hit is one row position at every
+stage; zone tracking needs nothing else (no events.csv).
 
 Outputs (in --out-dir/beta, --out-dir = the run directory)
 ----------------------------------------------------------
 beta_histogram.{png,pdf}
 z_vs_beta.{png,pdf}                         all stages, one scatter panel each
 z_vs_beta/<i>_<stage>.{png,pdf}             one figure per stage, i = network order
+z_vs_beta_zones.pdf                         all stages, zone hits coloured
+z_ref_vs_z_stages.pdf                       z at REF_STAGE vs z at every other stage
+z_vs_beta_zones_sign.csv                    per zone and stage: hit counts by sign of z,
+                                            fraction still in the zone's z range,
+                                            16/50/84th percentile of z
+z_vs_beta_zones_boxes.csv                   per stage and box: hits inside, by reference zone
+                                            (the box counts of z_vs_beta_zones)
+z_vs_beta_zones_hits.csv                    event_id, hit_id, zone of every zone hit
+                                            (among the N_SCATTER shown hits)
 z_vs_beta_density.pdf                       all stages, one 2D histogram panel each
 z_vs_beta_density_counts.csv                the counts of every bin (stage, bin edges, count)
+z_vs_beta_density_negative.pdf              the same for z < 0 only, own z bins
+z_vs_beta_density_negative_counts.csv       its bin counts
+z_vs_beta_density_positive.pdf              the same for z > 0 only, own z bins
+z_vs_beta_density_positive_counts.csv       its bin counts
 g_vs_beta_density.pdf                       the same with the raw gradient g on x
 g_vs_beta_density_counts.csv                its bin counts
 beta_summary.csv                            per stage: hits drawn, N+, N-
@@ -65,6 +108,27 @@ cyan.jo, Claude Opus5.5 Extra, 2026-11-20: raw-gradient density figure
 g_vs_beta_density and its bin counts (--glim); the density plotting is shared
 by the z and g figures (plot_density_grid). Both density figures use the
 scatter's N_SCATTER subsample instead of all hits.
+cyan.jo, Claude Opus5.5 Extra, 2026-11-23: one-sided density figures
+z_vs_beta_density_negative / _positive (z < 0 and z > 0 separately, own z
+range and DENSITY_NBINS bins per side, z = 0 excluded and counted, one
+colour scale for both) and their bin counts. plot_density_grid takes
+precomputed counts, a fixed colour maximum, per-stage beta, panel texts and
+a title note; density_meta stores the x range.
+cyan.jo, Claude Opus5.5 Extra, 2026-11-27: zone tracking (ZONES, REF_STAGE,
+N_ZONE_DRAW): z_vs_beta_zones, z_ref_vs_z_stages, the zone sign table and
+the zone hit list; zone settings in beta_meta.json.
+cyan.jo, Claude Opus5.5 Extra, 2026-11-27: zone figures: grey background =
+hits in no zone only (gray, BACKGROUND_ALPHA = 0.15, just below
+ZONE_ALPHA); the zones' drawn hits are one shuffled layer instead of one
+layer per zone, which let the last zone drawn hide the others.
+cyan.jo, Claude Opus5.5 Extra, 2026-11-27: zone boxes on every panel; per
+box, the hits inside it at that stage by reference zone, written next to
+the box (ZONE_TEXT_POS, ZONE_TEXT_FONTSIZE) and saved as
+z_vs_beta_zones_boxes.csv. Each count line in its zone's colour
+(getColour(k)), "none" in NONE_TEXT_COLOUR; no header line. Every zone is
+listed in every box, each line labelled by its origin (ORIGIN_LABEL).
+Then zones that can never reach a box (no beta overlap, always 0) are
+left out of its text and of the CSV again.
 """
 from __future__ import annotations
 
@@ -76,7 +140,9 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from matplotlib.colors import LogNorm, Normalize
+from matplotlib.colors import LogNorm, Normalize, to_rgba
+from matplotlib.lines import Line2D
+from matplotlib.patches import Rectangle
 from matplotlib.ticker import FuncFormatter, MaxNLocator
 
 # Utils (PlotUtils, ExternalFunctions) is put on PYTHONPATH by run_beta_statistics.sh.
@@ -108,10 +174,55 @@ Z_NBINS = 100
 N_SCATTER = 1_000_000
 # Bins per axis of the (z, beta) density figure: z in [-lim, lim] and beta in
 # [0, 1], each in DENSITY_NBINS bins (50 bins: lim = 7.5 gives z bins 0.3 wide,
-# beta bins 0.02). The raw-gradient density figure uses the same number.
+# beta bins 0.02). The raw-gradient density figure and each side of the
+# one-sided figures use the same number.
 DENSITY_NBINS = 50
 # Colour map of the density figure.
 DENSITY_CMAP = "YlGnBu"
+# The two one-sided density figures: file suffix, hits kept, title note.
+SIDES = (
+    ("negative", np.less, r"$z < 0$"),
+    ("positive", np.greater, r"$z > 0$"),
+)
+
+# Zone tracking. Boxes in the (z, beta) plane of REF_STAGE:
+# name -> ((z_low, z_high), (beta_low, beta_high)), bounds inclusive.
+# Zone i is drawn in getColour(i); a hit inside several boxes belongs to the
+# first one listed.
+ZONES = {
+    "A": ((-6.0, -2.5), (0.8, 1.0)), # negative z, high beta
+    # "B": ((-7.0, -1.0), (0.0, 0.2)), # negative z, low beta
+    "B": ((-5.5, -4.5), (0.4, 0.8)), # negative z, low beta, post output tail
+    "C": ((2.5, 6.0), (0.8, 1.0)),   # positive z, high beta
+    # "D": ((1.0, 7.0), (0.0, 0.2)),   # positive z, low beta
+    "D": ((4.0, 5.0), (0.0, 0.2)),   # positive z, low beta, post output tail
+}
+# Stage on which the zones are defined; None = the first stage shown.
+REF_STAGE = "gradient_post_output"
+# At most this many random hits per zone are drawn (the same at every stage);
+# counts and fractions use all of the zone's hits.
+N_ZONE_DRAW = None #20_000
+ZONE_MARKER_SIZE = 2
+ZONE_ALPHA = 0.1
+# Box counts in z_vs_beta_zones: top-left corner of each box's text, in axes
+# fractions (zones not listed get no text), its font size, the colour of the
+# "none" line, and the label of each count line ({zone} = reference zone,
+# {stage} = reference stage label, e.g. "{zone}@{stage}"). A block lists only
+# the zones that can reach the box, plus "none"; C and D at x = 0.80 keep the
+# lines inside the panel.
+ZONE_TEXT_POS = {
+    "A": (0.02, 0.78),
+    "B": (0.02, 0.33),
+    "C": (0.77, 0.78),
+    "D": (0.77, 0.33),
+}
+ORIGIN_LABEL = "from {zone}"
+ZONE_TEXT_FONTSIZE = 12
+NONE_TEXT_COLOUR = "dimgray"
+# Background of the zone figures: the shown hits in no zone (at REF_STAGE),
+# a little fainter than the zone hits.
+BACKGROUND_COLOUR = "gray"
+BACKGROUND_ALPHA = 0.05
 
 
 # -----------------------------------------------------------------------------
@@ -350,6 +461,291 @@ def plot_z_vs_beta_grid(
     return fig, axes
 
 
+# -----------------------------------------------------------------------------
+# Zone tracking
+# -----------------------------------------------------------------------------
+def check_zones(zones):
+    """Every zone needs z_low < z_high and beta_low < beta_high."""
+    for name, ((z0, z1), (b0, b1)) in zones.items():
+        if not (z0 < z1 and b0 < b1):
+            raise ValueError(f"Zone {name}: need z_low < z_high and beta_low < beta_high, "
+                             f"got z [{z0}, {z1}], beta [{b0}, {b1}].")
+
+
+def assign_zones(z_ref, beta, zones):
+    """Zone of every hit on the reference stage.
+
+    Returns (zone_of, n_multiple): zone_of[i] = position of the hit's zone in
+    `zones`, -1 outside every box; bounds are inclusive. A hit inside several
+    boxes belongs to the first one; n_multiple counts such hits.
+    """
+    zone_of = np.full(len(z_ref), -1, dtype=np.int64)
+    n_boxes = np.zeros(len(z_ref), dtype=np.int64)
+    for k, ((z0, z1), (b0, b1)) in enumerate(zones.values()):
+        inside = (z_ref >= z0) & (z_ref <= z1) & (beta >= b0) & (beta <= b1)
+        zone_of[inside & (zone_of < 0)] = k
+        n_boxes += inside
+    return zone_of, int((n_boxes > 1).sum())
+
+
+def zone_draw_positions(zone_of, n_zones, n_draw, seed):
+    """Per zone, the hit positions drawn in the zone figures: all of the
+    zone's hits (n_draw None), or at most n_draw random ones. The same hits
+    at every stage."""
+    rng = np.random.default_rng(seed)
+    drawn = []
+    for k in range(n_zones):
+        positions = np.flatnonzero(zone_of == k)
+        if n_draw is not None and len(positions) > n_draw:
+            positions = np.sort(rng.choice(positions, size=n_draw, replace=False))
+        drawn.append(positions)
+    return drawn
+
+
+def zone_layer(drawn, seed):
+    """The drawn hits of all zones as one layer: (positions, RGBA colours) in
+    a fixed random order, the same in every panel. Drawn in one call, no
+    zone is systematically on top of another."""
+    positions = np.concatenate(drawn) if drawn else np.empty(0, dtype=np.int64)
+    zone_index = np.concatenate([np.full(len(p), k) for k, p in enumerate(drawn)])
+    palette = np.array([to_rgba(getColour(k), ZONE_ALPHA) for k in range(len(drawn))])
+    order = np.random.default_rng(seed).permutation(len(positions))
+    return positions[order], palette[zone_index[order]]
+
+
+def zone_sign_text(z, zone_of, zones) -> dict:
+    """Panel text: per zone, the fraction of its hits with z > 0 at this stage."""
+    text = {}
+    for k, name in enumerate(zones):
+        z_zone = z[zone_of == k]
+        text[f"{name}: z>0"] = f"{100 * (z_zone > 0).mean():.1f}%" if z_zone.size else "-"
+    return text
+
+
+def ranges_overlap(a, b) -> bool:
+    """Closed intervals a = (low, high) and b share at least one point."""
+    return a[0] <= b[1] and b[0] <= a[1]
+
+
+def box_counts(z, beta, zone_of, zones) -> dict:
+    """Hits inside every zone box at one stage, by their reference zone.
+
+    Returns {box: {origin: count}}; origins are the zones whose beta range
+    overlaps the box's, in ZONES order (beta does not change between
+    stages, so any other zone would always count 0), then "none" = hits in
+    no zone at the reference. Counts use all shown hits, not only the drawn
+    ones.
+    """
+    counts = {}
+    for box, ((z0, z1), (b0, b1)) in zones.items():
+        inside = (z >= z0) & (z <= z1) & (beta >= b0) & (beta <= b1)
+        by_origin = {origin: int((inside & (zone_of == k)).sum())
+                     for k, (origin, (_, beta_range)) in enumerate(zones.items())
+                     if ranges_overlap(beta_range, (b0, b1))}
+        by_origin["none"] = int((inside & (zone_of < 0)).sum())
+        counts[box] = by_origin
+    return counts
+
+
+def draw_box_counts(ax, x, y, by_origin, zones, ref_label):
+    """The counts of one box at (x, y), axes fractions: one line per
+    reference zone, labelled by ORIGIN_LABEL and drawn in that zone's colour
+    (getColour of its position in ZONES), then "none" in NONE_TEXT_COLOUR.
+    add_text_to_ax takes one colour per call, so every line is its own call,
+    pushed down by leading newlines; all calls share the anchor and font, so
+    the lines stay aligned.
+    """
+    names = list(zones)
+    entries = [(ORIGIN_LABEL.format(zone=origin, stage=ref_label), n,
+                getColour(names.index(origin)))
+               for origin, n in by_origin.items() if origin != "none"]
+    entries.append(("none", by_origin["none"], NONE_TEXT_COLOUR))
+    width = max(len(label) for label, _, _ in entries) + 1
+    lines = [(f"{label:<{width}}{n:>7,}", colour) for label, n, colour in entries]
+    for i, (text, colour) in enumerate(lines):
+        add_text_to_ax(x, y, "\n" * i + text, ax=ax,
+                       fontsize=ZONE_TEXT_FONTSIZE, color=colour)
+
+
+def box_count_table(z_by_stage, beta, zone_of, zones, labels) -> pd.DataFrame:
+    """Long table of the box counts: stage, box, reference zone, hits."""
+    rows = []
+    for stage, z in z_by_stage.items():
+        for box, by_origin in box_counts(z, beta, zone_of, zones).items():
+            for origin, n in by_origin.items():
+                rows.append({"stage": stage, "label": labels[stage], "box": box,
+                             "origin": origin, "count": n})
+    return pd.DataFrame(rows)
+
+
+def zone_legend_handles(zones, n_in_zone, drawn):
+    """Legend entries: the grey background, then every zone with its box and counts."""
+    handles = [Line2D([], [], linestyle="none", marker="o", markersize=7,
+                      color=BACKGROUND_COLOUR, label="hits in no zone")]
+    for k, (name, ((z0, z1), (b0, b1))) in enumerate(zones.items()):
+        handles.append(Line2D(
+            [], [], linestyle="none", marker="o", markersize=7, color=getColour(k),
+            label=(rf"{name}: $z \in [{z0:g}, {z1:g}]$, $\beta \in [{b0:g}, {b1:g}]$"
+                   f"\n     {n_in_zone[k]:,} hits, {len(drawn[k]):,} drawn")))
+    return handles
+
+
+def finish_zone_grid(fig, axes, n_used, handles, legend_title, xlabel):
+    """Legend in the first spare panel (or above the panels if none is spare),
+    remove the other spare panels, one x label for the figure."""
+    spare = list(axes.ravel()[n_used:])
+    for ax in spare[1:]:
+        fig.delaxes(ax)
+    if spare:
+        spare[0].axis("off")
+        spare[0].legend(handles=handles, loc="center", title=legend_title,
+                        frameon=False, fontsize=12, title_fontsize=13)
+        fig.tight_layout(rect=(0, 0.05, 1, 1))
+    else:
+        fig.legend(handles=handles, loc="upper center", ncol=len(handles),
+                   title=legend_title, frameon=False, bbox_to_anchor=(0.5, 1.0))
+        fig.tight_layout(rect=(0, 0.05, 1, 0.9))
+    fig.supxlabel(xlabel, y=0.01, fontsize=plt.rcParams["axes.labelsize"])
+
+
+def plot_z_vs_beta_zones(
+    z_by_stage,
+    beta,
+    *,
+    labels,
+    zones,
+    ref_stage,
+    zone_of,
+    drawn,
+    zlim,
+    log_scale=1e-8,
+    beta_threshold=None,
+    marker_size=1,
+    seed=0,
+    ncols=3,
+):
+    """(z, beta) of every stage, the hits of each reference-stage zone in
+    their zone's colour over a grey background of the hits in no zone. The zone
+    boxes are drawn on the reference panel. beta is a hit's own value at
+    every stage, so a zone can only move along z. Returns (fig, axes).
+    """
+    stages = list(z_by_stage)
+    nrows = int(np.ceil(len(stages) / ncols))
+    fig, axes = plt.subplots(nrows, ncols, figsize=(7 * ncols, 6 * nrows),
+                             sharex=True, sharey=True, squeeze=False)
+    outside = zone_of < 0
+    positions, colours = zone_layer(drawn, seed)
+    for ax, stage in zip(axes.ravel(), stages):
+        z = z_by_stage[stage]
+        draw_scatter(ax, z[outside], beta[outside], colour=BACKGROUND_COLOUR, zlim=zlim,
+                     beta_threshold=beta_threshold, marker_size=marker_size,
+                     alpha=BACKGROUND_ALPHA)
+        ax.scatter(z[positions], beta[positions], s=ZONE_MARKER_SIZE, c=colours,
+                   linewidths=0, rasterized=True)
+        # Boxes on every panel: dashed on the reference, dotted elsewhere.
+        is_ref = stage == ref_stage
+        for k, ((z0, z1), (b0, b1)) in enumerate(zones.values()):
+            ax.add_patch(Rectangle((z0, b0), z1 - z0, b1 - b0, fill=False,
+                                   edgecolor=getColour(k),
+                                   linewidth=1.8 if is_ref else 1.2,
+                                   linestyle="--" if is_ref else ":", zorder=5))
+        # Hits inside each box at this stage, by reference zone.
+        for box, by_origin in box_counts(z, beta, zone_of, zones).items():
+            if box in ZONE_TEXT_POS:
+                x, y = ZONE_TEXT_POS[box]
+                draw_box_counts(ax, x, y, by_origin, zones, labels[ref_stage])
+        ax.set_title(f"{labels[stage]} (reference)" if is_ref else labels[stage])
+        # Top centre (z near 0, high beta) is empty in the real panels; the
+        # top-left corner would cover zone A.
+        add_text_to_ax(0.40, 0.97, nice_string_output(zone_sign_text(z, zone_of, zones)),
+                       ax=ax, fontsize=12)
+    for ax in axes[:, 0]:
+        ax.set_ylabel(r"$\beta$ value")
+
+    n_in_zone = [int((zone_of == k).sum()) for k in range(len(zones))]
+    finish_zone_grid(fig, axes, len(stages), zone_legend_handles(zones, n_in_zone, drawn),
+                     f"Zones at {labels[ref_stage]}", z_label(log_scale))
+    return fig, axes
+
+
+def plot_zref_vs_zstage(
+    z_by_stage,
+    *,
+    labels,
+    zones,
+    ref_stage,
+    zone_of,
+    drawn,
+    zlim,
+    marker_size=1,
+    seed=0,
+    ncols=3,
+):
+    """z at the reference stage (x) against z at every other stage (y), zone
+    hits coloured as in z_vs_beta_zones. Dashed: y = x (z unchanged); dotted:
+    y = -x. Hits in the upper-left and lower-right quadrants changed the sign
+    of g. Returns (fig, axes), or None if the reference is the only stage.
+    """
+    stages = [s for s in z_by_stage if s != ref_stage]
+    if not stages:
+        return None
+    z_ref = z_by_stage[ref_stage]
+    nrows = int(np.ceil(len(stages) / ncols))
+    fig, axes = plt.subplots(nrows, ncols, figsize=(6.5 * ncols, 6.5 * nrows),
+                             sharex=True, sharey=True, squeeze=False)
+    outside = zone_of < 0
+    positions, colours = zone_layer(drawn, seed)
+    for ax, stage in zip(axes.ravel(), stages):
+        z = z_by_stage[stage]
+        ax.scatter(z_ref[outside], z[outside], s=marker_size, alpha=BACKGROUND_ALPHA,
+                   color=BACKGROUND_COLOUR, linewidths=0, rasterized=True)
+        ax.scatter(z_ref[positions], z[positions], s=ZONE_MARKER_SIZE, c=colours,
+                   linewidths=0, rasterized=True)
+        ax.plot([-zlim, zlim], [-zlim, zlim], color="gray", linestyle="--", linewidth=0.8)
+        ax.plot([-zlim, zlim], [zlim, -zlim], color="gray", linestyle=":", linewidth=0.8)
+        ax.axhline(0, color="gray", linewidth=0.8)
+        ax.axvline(0, color="gray", linewidth=0.8)
+        ax.set_xlim(-zlim, zlim)
+        ax.set_ylim(-zlim, zlim)
+        ax.set_aspect("equal", adjustable="box")
+        ax.set_title(labels[stage])
+        add_text_to_ax(0.02, 0.97, nice_string_output(zone_sign_text(z, zone_of, zones)),
+                       ax=ax, fontsize=12)
+    for ax in axes[:, 0]:
+        ax.set_ylabel(r"$z$ at the panel's stage")
+
+    n_in_zone = [int((zone_of == k).sum()) for k in range(len(zones))]
+    finish_zone_grid(fig, axes, len(stages), zone_legend_handles(zones, n_in_zone, drawn),
+                     f"Zones at {labels[ref_stage]}",
+                     rf"$z$ at {labels[ref_stage]} (reference)")
+    return fig, axes
+
+
+def zone_sign_table(z_by_stage, zone_of, zones, labels, ref_stage) -> pd.DataFrame:
+    """Per zone and stage, over all of the zone's hits: counts by sign of z,
+    the fraction still inside the zone's z range (beta does not change), and
+    the 16th, 50th and 84th percentile of z."""
+    rows = []
+    for k, (name, ((z0, z1), _)) in enumerate(zones.items()):
+        in_zone = zone_of == k
+        for stage, z in z_by_stage.items():
+            z_zone = z[in_zone]
+            n = int(z_zone.size)
+            q16, q50, q84 = (np.percentile(z_zone, [16, 50, 84]) if n
+                             else (np.nan, np.nan, np.nan))
+            rows.append({
+                "zone": name, "stage": stage, "label": labels[stage],
+                "reference": stage == ref_stage, "n": n,
+                "n_pos": int((z_zone > 0).sum()), "n_neg": int((z_zone < 0).sum()),
+                "n_zero": int((z_zone == 0).sum()),
+                "frac_pos": (z_zone > 0).mean() if n else np.nan,
+                "frac_neg": (z_zone < 0).mean() if n else np.nan,
+                "frac_in_zone_z": ((z_zone >= z0) & (z_zone <= z1)).mean() if n else np.nan,
+                "z_q16": q16, "z_median": q50, "z_q84": q84,
+            })
+    return pd.DataFrame(rows)
+
+
 def symmetric_edges(values_by_stage, *, nbins=DENSITY_NBINS, lim=None):
     """nbins equal bins over [-lim, lim], shared by every stage.
 
@@ -361,9 +757,39 @@ def symmetric_edges(values_by_stage, *, nbins=DENSITY_NBINS, lim=None):
     return np.linspace(-lim, lim, nbins + 1)
 
 
+def one_sided_edges(values_by_stage, side, *, nbins=DENSITY_NBINS, lim=None):
+    """nbins equal bins over [-lim, 0] (side "negative") or [0, lim]
+    ("positive"), shared by every stage.
+
+    values_by_stage holds only the values of that side. lim = the given lim,
+    else their largest |value| over all stages (1 if every stage is empty).
+    """
+    if lim is None:
+        lim = max((float(np.abs(v).max()) for v in values_by_stage.values() if v.size),
+                  default=0.0) or 1.0
+    if side == "negative":
+        return np.linspace(-lim, 0.0, nbins + 1)
+    return np.linspace(0.0, lim, nbins + 1)
+
+
 def beta_bin_edges(nbins=DENSITY_NBINS):
     """nbins equal beta bins over [0, 1]."""
     return np.linspace(0.0, 1.0, nbins + 1)
+
+
+def density_counts(x_by_stage, beta, x_edges, beta_edges) -> dict:
+    """2D histogram counts per stage, indexed [x bin, beta bin].
+
+    beta is one array for every stage, or {stage: array} when each stage
+    keeps different hits (the one-sided figures).
+    """
+    def beta_of(stage):
+        return beta[stage] if isinstance(beta, dict) else beta
+
+    return {stage: np.histogram2d(np.asarray(x, dtype=np.float64),
+                                  np.asarray(beta_of(stage), dtype=np.float64),
+                                  bins=(x_edges, beta_edges))[0]
+            for stage, x in x_by_stage.items()}
 
 
 def plot_density_grid(
@@ -380,6 +806,10 @@ def plot_density_grid(
     cmap=DENSITY_CMAP,
     scientific_x=False,
     extra_text=None,
+    counts=None,
+    vmax=None,
+    panel_text=None,
+    title_note=None,
     ncols=3,
 ):
     """Population density of (x, beta) at every stage in one figure.
@@ -392,16 +822,22 @@ def plot_density_grid(
     apart from "few hits". Hits outside the x range (only with a fixed
     range below the largest |x|) are not drawn; the panel says how many.
     x_symbol is the LaTeX symbol of x in the title (e.g. "z", "g").
+    beta: one array, or {stage: array} when each stage keeps different hits.
     scientific_x writes the x ticks as multiples of a power of ten (raw g).
     extra_text: optional {stage: {key: text}} added to each panel's counts.
+    counts: precomputed density_counts (default: computed here).
+    vmax: largest count of the colour scale (default: largest bin here), so
+    several figures can share one colour scale.
+    panel_text: optional {stage: {key: text}} replacing the default hit
+    counts (N, N+, N-) of a panel.
+    title_note: optional text added to the figure title (e.g. "$z < 0$").
     Returns (fig, axes, counts); counts[stage] has shape
     (len(x_edges) - 1, len(beta_edges) - 1), indexed [x bin, beta bin].
     """
-    beta = np.asarray(beta, dtype=np.float64)
-    counts = {stage: np.histogram2d(np.asarray(x, dtype=np.float64), beta,
-                                    bins=(x_edges, beta_edges))[0]
-              for stage, x in x_by_stage.items()}
-    vmax = max(1.0, max(float(c.max()) for c in counts.values()))
+    if counts is None:
+        counts = density_counts(x_by_stage, beta, x_edges, beta_edges)
+    if vmax is None:
+        vmax = max(1.0, max(float(c.max()) for c in counts.values()))
     norm = LogNorm(vmin=1, vmax=vmax) if log_counts else Normalize(vmin=0, vmax=vmax)
 
     stages = list(x_by_stage)
@@ -425,7 +861,10 @@ def plot_density_grid(
             ax.ticklabel_format(axis="x", style="sci", scilimits=(0, 0),
                                 useMathText=True)
         ax.set_title(labels[stage])
-        text = hit_counts(x)
+        if panel_text and stage in panel_text:
+            text = dict(panel_text[stage])
+        else:
+            text = hit_counts(x)
         n_outside = len(x) - int(counts[stage].sum())
         if n_outside:
             text["outside"] = f"{n_outside:,}"
@@ -442,8 +881,9 @@ def plot_density_grid(
     colourbar.set_label("Hits per bin" + (" (log scale)" if log_counts else ""))
 
     nx, nb = len(x_edges) - 1, len(beta_edges) - 1
+    note = f", {title_note}" if title_note else ""
     fig.suptitle(
-        rf"Population density of $({x_symbol}, \beta)$: {nx} $\times$ {nb} bins, "
+        rf"Population density of $({x_symbol}, \beta)${note}: {nx} $\times$ {nb} bins, "
         rf"$\Delta {x_symbol}$ = {x_edges[1] - x_edges[0]:.3g}, "
         rf"$\Delta\beta$ = {beta_edges[1] - beta_edges[0]:.3g}")
     fig.supxlabel(xlabel, fontsize=plt.rcParams["axes.labelsize"])
@@ -467,9 +907,14 @@ def density_counts_table(counts, labels, x_edges, beta_edges, *, x_name="z") -> 
 
 
 def density_meta(counts, x_edges, beta_edges, *, n_points, linear_counts) -> dict:
-    """Settings and result size of one density figure, for beta_meta.json."""
+    """Settings and result size of one density figure, for beta_meta.json.
+
+    lim = the largest |edge|; x_range gives both ends (one-sided figures
+    have one end at 0).
+    """
     return {"nbins": len(x_edges) - 1, "n_points": int(n_points),
-            "lim": float(x_edges[-1]),
+            "lim": float(max(abs(x_edges[0]), abs(x_edges[-1]))),
+            "x_range": [float(x_edges[0]), float(x_edges[-1])],
             "x_bin_width": float(x_edges[1] - x_edges[0]),
             "beta_bin_width": float(beta_edges[1] - beta_edges[0]),
             "cmap": DENSITY_CMAP,
@@ -494,6 +939,14 @@ def run(args):
         if beta_file is None:
             raise FileNotFoundError(
                 f"No beta.csv in {args.probe_dir} or its parent; pass --beta-file.")
+
+    # Zone settings are checked before the (slow) reading.
+    check_zones(ZONES)
+    ref_stage = REF_STAGE or next(iter(stage_files))
+    if ref_stage not in stage_files:
+        raise SystemExit(
+            f"REF_STAGE {ref_stage!r} is not among the stages read "
+            f"({', '.join(stage_files)}); change REF_STAGE or --stages.")
 
     stage_frames = {}
     for stage, path in stage_files.items():
@@ -552,10 +1005,72 @@ def run(args):
     save_figure(fig, out_dir, "z_vs_beta")
     plt.close(fig)
 
+    # 2b. Zone tracking over the same hits. All CSVs share their rows, so a
+    #     hit is the same position in every stage's z array.
+    beta_shown = beta[rows]
+    zone_of, n_multiple = assign_zones(z_by_stage[ref_stage], beta_shown, ZONES)
+    drawn = zone_draw_positions(zone_of, len(ZONES), N_ZONE_DRAW, args.seed)
+    n_in_zone = {name: int((zone_of == k).sum()) for k, name in enumerate(ZONES)}
+    print(f"Zones at {ref_stage}: "
+          + ", ".join(f"{name} {n:,}" for name, n in n_in_zone.items())
+          + f" of {len(rows):,} shown hits; {int((zone_of < 0).sum()):,} in no zone.")
+    if n_multiple:
+        print(f"WARNING: {n_multiple:,} hits lie in more than one zone box; "
+              "each is kept in the first such zone (ZONES order).")
+
+    fig, _ = plot_z_vs_beta_zones(
+        z_by_stage, beta_shown, labels=labels, zones=ZONES, ref_stage=ref_stage,
+        zone_of=zone_of, drawn=drawn, zlim=zlim, log_scale=args.log_scale,
+        beta_threshold=args.beta_threshold, marker_size=args.marker_size,
+        seed=args.seed)
+    save_figure(fig, out_dir, "z_vs_beta_zones")
+    plt.close(fig)
+
+    result = plot_zref_vs_zstage(
+        z_by_stage, labels=labels, zones=ZONES, ref_stage=ref_stage,
+        zone_of=zone_of, drawn=drawn, zlim=zlim, marker_size=args.marker_size,
+        seed=args.seed)
+    if result is not None:
+        save_figure(result[0], out_dir, "z_ref_vs_z_stages")
+        plt.close(result[0])
+
+    sign_table = zone_sign_table(z_by_stage, zone_of, ZONES, labels, ref_stage)
+    sign_table.to_csv(out_dir / "z_vs_beta_zones_sign.csv", index=False)
+    print("\n" + sign_table[["zone", "stage", "n", "frac_pos", "frac_in_zone_z",
+                             "z_median"]].to_string(index=False, float_format="%.3f"))
+
+    box_table = box_count_table(z_by_stage, beta_shown, zone_of, ZONES, labels)
+    box_table.to_csv(out_dir / "z_vs_beta_zones_boxes.csv", index=False)
+    print(f"Saved {out_dir / 'z_vs_beta_zones_boxes.csv'}")
+
+    zone_names = np.array(list(ZONES))
+    in_any = zone_of >= 0
+    ref_frame = stage_frames[ref_stage]
+    pd.DataFrame({
+        "event_id": ref_frame["event_id"].to_numpy()[rows][in_any],
+        "hit_id": ref_frame["hit_id"].to_numpy()[rows][in_any],
+        "zone": zone_names[zone_of[in_any]],
+    }).to_csv(out_dir / "z_vs_beta_zones_hits.csv", index=False)
+    print(f"Saved {out_dir / 'z_vs_beta_zones_sign.csv'}")
+    print(f"Saved {out_dir / 'z_vs_beta_zones_hits.csv'}")
+    zone_info = {
+        "ref_stage": ref_stage,
+        "zones": {name: {"z": list(z_range), "beta": list(beta_range)}
+                  for name, (z_range, beta_range) in ZONES.items()},
+        "bounds": "inclusive; a hit in several boxes belongs to the first zone",
+        "n_in_zone": n_in_zone,
+        "n_no_zone": int((zone_of < 0).sum()),
+        "n_in_several_boxes": n_multiple,
+        "n_draw_max": N_ZONE_DRAW,
+        "n_drawn": {name: int(len(drawn[k])) for k, name in enumerate(ZONES)},
+        "colours": {name: f"getColour({k})" for k, name in enumerate(ZONES)},
+        "background": "hits in no zone",
+        "text_positions": {name: list(pos) for name, pos in ZONE_TEXT_POS.items()},
+    }
+
     # 3. Population density over the scatter's N_SCATTER hits (the same rows
     #    at every stage and in both figures), DENSITY_NBINS bins per axis,
     #    shared edges and colour scale: (z, beta), then the raw gradient (g, beta).
-    beta_shown = beta[rows]
     g_shown_by_stage = {s: f["value"].to_numpy(dtype=np.float64)[rows]
                         for s, f in stage_frames.items()}
     beta_edges = beta_bin_edges(DENSITY_NBINS)
@@ -578,6 +1093,48 @@ def run(args):
         out_dir / "z_vs_beta_density_counts.csv", index=False)
     density_info["z"] = density_meta(counts, z_edges, beta_edges, n_points=len(rows),
                                      linear_counts=args.linear_counts)
+
+    # One sign of z per figure, the same hits. Each side has DENSITY_NBINS z
+    # bins over its own range; z = 0 (g = 0) is in neither side and counted
+    # per panel. Counts of both sides first, so both share one colour scale.
+    sides = {}
+    for side, keep, note in SIDES:
+        masks = {s: keep(z, 0.0) for s, z in z_by_stage.items()}
+        z_side = {s: z_by_stage[s][m] for s, m in masks.items()}
+        beta_side = {s: beta_shown[m] for s, m in masks.items()}
+        edges = one_sided_edges(z_side, side, nbins=DENSITY_NBINS, lim=args.zlim)
+        sides[side] = {
+            "note": note, "z": z_side, "beta": beta_side, "edges": edges,
+            "counts": density_counts(z_side, beta_side, edges, beta_edges),
+            "text": {s: {"N": f"{len(z_side[s]):,}",
+                         "of": f"{len(rows):,}",
+                        #  "z = 0": f"{int((z_by_stage[s] == 0).sum()):,}"
+                         }
+                     for s in z_by_stage},
+        }
+    vmax_sides = max(1.0, max(float(c.max()) for d in sides.values()
+                              for c in d["counts"].values()))
+    for side, d in sides.items():
+        edges = d["edges"]
+        print(f"Density (z, {side}): z in [{edges[0]:.3f}, {edges[-1]:.3f}] "
+              f"(bin width {edges[1] - edges[0]:.3f}), hits per stage "
+              + ", ".join(f"{s} {len(z):,}" for s, z in d["z"].items()) + ".")
+        fig, _, _ = plot_density_grid(
+            d["z"], d["beta"], x_edges=edges, xlabel=z_label(args.log_scale),
+            x_symbol="z", counts=d["counts"], vmax=vmax_sides,
+            panel_text=d["text"], title_note=d["note"], **density_kwargs)
+        save_figure(fig, out_dir, f"z_vs_beta_density_{side}")
+        plt.close(fig)
+        density_counts_table(d["counts"], labels, edges, beta_edges, x_name="z").to_csv(
+            out_dir / f"z_vs_beta_density_{side}_counts.csv", index=False)
+        density_info[f"z_{side}"] = {
+            **density_meta(d["counts"], edges, beta_edges, n_points=len(rows),
+                           linear_counts=args.linear_counts),
+            "n_on_side": {s: int(len(z)) for s, z in d["z"].items()},
+            "n_zero": {s: int((z_by_stage[s] == 0).sum()) for s in z_by_stage},
+            "colour_max_shared": vmax_sides,
+        }
+    del sides
 
     g_edges = symmetric_edges(g_shown_by_stage, nbins=DENSITY_NBINS, lim=args.glim)
     print(f"Density (g): g in [{g_edges[0]:.3e}, {g_edges[-1]:.3e}] "
@@ -614,6 +1171,7 @@ def run(args):
         "histogram": {"bins": BETA_NBINS, **hist_stats},
         "scatter": {"z_bins": Z_NBINS, "n_points": int(len(rows)),
                     "n_scatter": N_SCATTER, "seed": args.seed, "zlim": zlim},
+        "zones": zone_info,
         "density": density_info,
         "beta_threshold": args.beta_threshold,
         "transform": {"name": "signed_log10",
@@ -652,16 +1210,18 @@ def parse_args(argv=None):
                         help="scale of the signed_log10 transform (default 1e-8, as in "
                              "gradient_statistics.py)")
     parser.add_argument("--zlim", type=float, default=None,
-                        help="z range [-zlim, zlim] of the scatter and density figures "
-                             "(default: scatter 1.05 x max |z|, density max |z|, both of "
-                             "the shown hits)")
+                        help="z range of the scatter and density figures: [-zlim, zlim], "
+                             "and [-zlim, 0] / [0, zlim] in the one-sided density figures "
+                             "(default: scatter 1.05 x max |z|, density max |z|, one-sided "
+                             "max |z| of that sign, all of the shown hits)")
     parser.add_argument("--glim", type=float, default=None,
                         help="g range [-glim, glim] of the raw-gradient density figure "
                              "(default: max |g| of the shown hits over all stages)")
     parser.add_argument("--linear-counts", action="store_true",
                         help="linear colour scale in the density figures (default: log)")
     parser.add_argument("--seed", type=int, default=0,
-                        help="seed of the N_SCATTER subsample of the scatter and density figures (default 0)")
+                        help="seed of the N_SCATTER subsample of the scatter and density "
+                             "figures and of the drawn zone hits (default 0)")
     parser.add_argument("--marker-size", type=float, default=1.0,
                         help="scatter marker size in points^2 (default 1)")
     parser.add_argument("--alpha", type=float, default=0.1,

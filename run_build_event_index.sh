@@ -10,15 +10,20 @@
 CONTAINER=/ceph/cjo/containers/plotting.sif
 SOURCE_DIR=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd -P )
 # PROBE_DIR=/work/cjo/e2ereco_topas/20261019_Fisher_depth_probe/Results/20261019_Fisher_depth_probe_per_hit/grad
-PROBE_DIR=/work/cjo/e2ereco_local/20261118_Fisher_depth_probe/Results/20261118_Fisher_depth_probe_per_hit/grad
+# PROBE_DIR=/work/cjo/e2ereco_local/20261118_Fisher_depth_probe/Results/20261118_Fisher_depth_probe_per_hit/grad
+PROBE_DIR=/work/cjo/topas_gradient_probe/20261126_gradient_probe/Results/20261126_gradient_probe_per_hit/grad
 
 ARGS=(
-    --djcdc     /ceph/cjo/DICEv1_4_0_small/SingleJet_pt30_eta1p2_1p7_100k/ten_files_conversion/dataCollection.djcdc
-    --converter /work/cjo/e2ereco_bernoulli_reproduction/source/modules/datastructures/TrainData_DICE_cellparent.py
-    --root-dir  /ceph/cjo/DICEv1_4_0/SingleJet_pt30_eta1p2_1p7_100k
-    --probe-csv "${PROBE_DIR}/prop_gn1.csv"   # any one stage: all stages list the same hits
+    # --djcdc     /ceph/cjo/DICEv1_4_0_small/SingleJet_pt30_eta1p2_1p7_100k/ten_files_conversion/dataCollection.djcdc
+    # --converter /work/cjo/e2ereco_bernoulli_reproduction/source/modules/datastructures/TrainData_DICE_cellparent.py
+    # --root-dir  /ceph/cjo/DICEv1_4_0/SingleJet_pt30_eta1p2_1p7_100k
+    # --probe-csv "${PROBE_DIR}/gradient_gn1.csv"   # any one stage: all stages list the same hits
     # --out-dir   /ceph/cjo/GradientProbe/runs/20261019_Fisher_depth_probe
-    --out-dir   /ceph/cjo/GradientProbe/runs/20261118_Fisher_depth_probe
+    --djcdc     /ceph/jkiesele/datasets/dice/qcd_singlejet_pt20-200_eta3_noPromptLep/merged_global_tR0p65/djc/dataCollection.djcdc
+    --converter /work/cjo/e2ereco_gradient_probe/e2ereco_gradient_probe/modules/datastructures/TrainData_DICE_cellparent.py
+    --root-dir  /ceph/jkiesele/datasets/dice/qcd_singlejet_pt20-200_eta3_noPromptLep/merged_global_tR0p65
+    --probe-csv "${PROBE_DIR}/gradient_gn1.csv"   # any one stage: all stages list the same hits
+    --out-dir   /ceph/cjo/GradientProbe/runs/20261126_Fisher_depth_probe
 )
 
 apptainer exec \

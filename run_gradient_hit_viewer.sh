@@ -13,8 +13,8 @@ SOURCE_DIR=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd -P )
 UTILS_DIR=/work/cjo/Utils   # PlotUtils.py, ExternalFunctions.py
 
 ARGS=(
-    --run-dir   /ceph/cjo/GradientProbe/runs/20261118_Fisher_depth_probe
-    --converter /work/cjo/e2ereco_bernoulli_reproduction/source/modules/datastructures/TrainData_DICE_cellparent.py
+    --run-dir   /ceph/cjo/GradientProbe/runs/20261126_gradient_probe
+    --converter /work/cjo/e2ereco_gradient_probe/e2ereco_gradient_probe/modules/datastructures/TrainData_DICE_cellparent.py
     --fps 2
     --selection top30_min1 --events-per-stage 30
 )
